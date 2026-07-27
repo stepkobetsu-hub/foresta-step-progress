@@ -47,3 +47,10 @@ test("埋込みJavaScriptを構文解析できる", () => {
   assert.ok(scripts.length > 0);
   for (const source of scripts) new Script(source);
 });
+
+test("mobile target rows stay horizontal and clamp titles to two lines", () => {
+  assert.match(html, /\.targetChoice\{display:flex;align-items:center/);
+  assert.match(html, /\.targetTitleText\{[^}]*-webkit-line-clamp:2/);
+  assert.match(html, /<span class="unitStep">.*?<span class="targetTitle">/);
+  assert.match(html, /\.targetRow\{min-height:34px;padding:3px 6px\}/);
+});
