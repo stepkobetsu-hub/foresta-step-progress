@@ -124,3 +124,19 @@ test("student dashboard shows rate-aware achievement, greeting, summer period, a
   assert.match(html, /function maybeShowMilestone_/);
   assert.match(html, /class="todayPraise"/);
 });
+
+test("achievement popups use stable server selections and remain responsive", () => {
+  assert.match(html, /function achievementCharacterSvg_/);
+  for (const id of ["flag_bear","book_cat","pencil_rabbit","star_bird","cheer_dog","glasses_owl","crown_friend"]) {
+    assert.match(html, new RegExp(id));
+  }
+  assert.match(html, /function showPendingAchievement_/);
+  assert.match(html, /acknowledgeMilestone/);
+  assert.match(html, /scopeType:item\.scopeType/);
+  assert.match(html, /achievementPopup/);
+  assert.match(html, /width:calc\(100% - 16px\)/);
+  assert.match(html, /RARE! レア応援キャラクター/);
+  assert.match(html, /achievementBadgesHtml_/);
+  assert.match(html, /data-admin="achievements"/);
+  assert.match(html, /listAchievementHistory/);
+});
