@@ -4,7 +4,7 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>自主学習進捗管理【開発】</title>
+  <title>学習進捗管理【開発】</title>
   <style>
     :root{--ink:#16233c;--muted:#68758a;--line:#dfe5ed;--bg:#f3f6fa;--navy:#19315d;--blue:#2b6fc7;--green:#168269;--red:#ba4150;--amber:#a76312}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}
@@ -106,7 +106,7 @@
 </head>
 <body>
   <section id="login" class="login">
-    <div class="hero"><div class="logo">FS</div><p>個別指導STEP｜自主学習サポート</p><h1>自主学習<br>進捗管理</h1><p>教材ごとの学習単元と宿題を記録し、教室と進み具合を共有します。</p></div>
+    <div class="hero"><div class="logo">FS</div><p>個別指導STEP｜自主学習サポート</p><h1>学習進捗管理</h1><p>教材ごとの学習単元と宿題を記録し、教室と進み具合を共有します。</p></div>
     <div class="loginPane"><form id="loginForm" class="card loginCard">
       <div class="tabs"><button type="button" id="studentTab" class="active">生徒</button><button type="button" id="staffTab">講師・管理者</button></div>
       <h2 id="loginTitle">生徒ログイン</h2>
@@ -123,7 +123,7 @@
     </form></div>
   </section>
   <section id="application" class="hidden">
-    <header class="top"><div class="brand"><div class="logo">FS</div><span>自主学習進捗管理【開発】</span></div><div class="topActions"><span id="who" class="muted"></span><button id="logout">ログアウト</button></div></header>
+    <header class="top"><div class="brand"><div class="logo">FS</div><span>学習進捗管理【開発】</span></div><div class="topActions"><span id="who" class="muted"></span><button id="logout">ログアウト</button></div></header>
     <main id="main"></main>
     <div id="globalSave" class="globalSave hidden">すべて保存済み</div>
   </section>
@@ -248,8 +248,8 @@
   function showPendingAchievement_(d){const preview=achievementPreviewItem_();if(preview){showAchievementPopup_(preview);return}const item=d.achievements?.pending?.[0];if(!item)return;showAchievementPopup_(item);call('acknowledgeMilestone',{scopeType:item.scopeType,subject:item.subject||'',percent:Number(item.percent)}).then(()=>{d.achievements.pending=d.achievements.pending.filter(entry=>!(entry.scopeType===item.scopeType&&entry.subject===item.subject&&Number(entry.percent)===Number(item.percent)));d.achievements.recent=[Object.assign({},item,{reachedAt:new Date().toISOString()})].concat(d.achievements.recent||[]).slice(0,5)}).catch(()=>{})}
   function bindSubjectTabs(){document.querySelectorAll('[data-subject]').forEach(button=>button.onclick=()=>{state.subject=button.dataset.subject;renderStudent()})}
   function seriesInfo_(series){return series==='FORESTA_GOAL'?{label:'フォレスタゴール',purpose:'入試対策'}:{label:'フォレスタステップ',purpose:'復習用'}}
-  function materialTabsHtml_(d){return `<div class="materialTabs">${['FORESTA_STEP','FORESTA_GOAL'].map(series=>{const info=seriesInfo_(series),available=d.selectableUnits.some(unit=>unit.series===series);return `<button data-series="${series}" class="${state.series===series?'active':''}" ${available?'':'disabled'}>${esc(info.label)}<span>${esc(info.purpose)}</span></button>`}).join('')}</div>`}
-  function bindMaterialTabs_(d){document.querySelectorAll('[data-series]').forEach(button=>button.onclick=()=>{const nextSeries=button.dataset.series,hasSelectedUnits=d.units.some(unit=>unit.subject===state.subject&&unit.series===nextSeries);state.series=nextSeries;if(state.studentPage==='progress'&&!hasSelectedUnits)state.studentPage='targets';renderStudent()})}
+  function materialTabsHtml_(d){return `<div class="materialTabs">${['FORESTA_STEP','FORESTA_GOAL'].map(series=>{const info=seriesInfo_(series);return `<button data-series="${series}" class="${state.series===series?'active':''}">${esc(info.label)}<span>${esc(info.purpose)}</span></button>`}).join('')}</div>`}
+  function bindMaterialTabs_(d){document.querySelectorAll('[data-series]').forEach(button=>button.onclick=async()=>{const nextSeries=button.dataset.series,hasSelectableUnits=d.selectableUnits.some(unit=>unit.series===nextSeries),hasSelectedUnits=d.units.some(unit=>unit.subject===state.subject&&unit.series===nextSeries);state.series=nextSeries;if(state.studentPage==='progress'&&!hasSelectedUnits)state.studentPage='targets';if(!hasSelectableUnits){state.dashboardCache=null;await renderStudent();return}renderStudent()})}
   function renderProgressPage_(d,subjects){
     const units=d.units.filter(unit=>unit.subject===state.subject&&unit.series===state.series),info=seriesInfo_(state.series),hasLct=units.some(unit=>unit.hasLct);
     $('studentBody').innerHTML=`${materialTabsHtml_(d)}<div class="subjectTabs">${subjects}</div><section class="card panel subjectSurface ${subjectClass_(state.subject)}"><div class="panelHead"><div><p class="eyebrow">${esc(info.purpose)}｜${esc(info.label)}${esc(state.subject)}｜選択した目標範囲</p><h2>${hasLct?'LCT・':''}学習チェック</h2></div><span class="badge">${units.length}単元</span></div>${hasLct?'<div class="lctGuide"><b>LCTの判定</b><span>◎ 全問正解</span><span>○ 1問間違い</span><span>× 2問以上間違い</span></div>':''}<div class="progressColumns"><span>教材・単元名</span><span>周回</span><span>${hasLct?'LCT判定':'LCTなし'}</span><span>Point</span><span>WU</span><span>TRY</span><span>学習日</span></div><div class="unitList">${units.map(unitHtml).join('')||'<div class="empty">目標範囲が未選択です。「目標範囲」から選んでください。</div>'}</div></section>`;
