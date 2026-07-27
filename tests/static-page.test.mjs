@@ -54,3 +54,24 @@ test("mobile target rows stay horizontal and clamp titles to two lines", () => {
   assert.match(html, /<span class="unitStep">.*?<span class="targetTitle">/);
   assert.match(html, /\.targetRow\{min-height:34px;padding:3px 6px\}/);
 });
+
+test("progress rows group STEP with the unit name and LCT with its buttons", () => {
+  assert.match(html, /class="unitIdentity"><span class="unitStep">/);
+  assert.match(html, /class="unitTitle unitName"/);
+  assert.match(html, /class="lctButtons"><span class="lctLabel">LCT<\/span>/);
+  assert.match(html, /\.unitIdentity\{display:flex;align-items:center;gap:\.75em/);
+  assert.doesNotMatch(html, /LCT実施日/);
+});
+
+test("remembered login is opt-in, separated by login type, and does not auto-login", () => {
+  assert.match(html, /id="rememberLogin" type="checkbox"/);
+  assert.doesNotMatch(html, /id="rememberLogin"[^>]*checked/);
+  assert.match(html, /forestaProgress\.savedId\.student/);
+  assert.match(html, /forestaProgress\.savedId\.staff/);
+  assert.match(html, /forestaProgress\.savedPassword\.student/);
+  assert.match(html, /forestaProgress\.savedPassword\.staff/);
+  assert.match(html, /保存したログイン情報を消す/);
+  assert.match(html, /共有タブレットでは、チェックを入れないでください。/);
+  assert.match(html, /updateRememberedLogin_\(loginType,enteredId,enteredPassword,\$\('rememberLogin'\)\.checked\)/);
+  assert.doesNotMatch(html, /restoreRememberedLogin_[\s\S]{0,200}\.submit\(/);
+});
