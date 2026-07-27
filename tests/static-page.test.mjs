@@ -183,3 +183,25 @@ test("achievement popups use stable server selections and remain responsive", ()
   assert.match(html, /data-admin="achievements"/);
   assert.match(html, /listAchievementHistory/);
 });
+
+test("admin-only tools are folded into the settings menu", () => {
+  assert.match(html, /id="settingsToggle"/);
+  assert.match(html, /aria-controls="adminSettings"/);
+  assert.match(html, /id="adminSettings" class="adminSettings"/);
+  assert.match(html, /進行表（範囲基準）/);
+  assert.match(html, />総履歴</);
+  assert.match(html, />セキュリティテスト</);
+  assert.match(html, /state\.settingsOpen=!state\.settingsOpen/);
+});
+
+test("staff homework view renders one overdue card per student and opens filtered details", () => {
+  assert.match(html, /call\('listOverdueHomeworkStudents'\)/);
+  assert.match(html, /function overdueStudentCard_/);
+  assert.match(html, /data-overdue-student/);
+  assert.match(html, /宿題未完了の生徒/);
+  assert.match(html, /期限日の翌日以降も未完了の宿題がある生徒/);
+  assert.match(html, /現在、期限を過ぎた未完了宿題はありません。/);
+  assert.match(html, /filters:\{studentId:state\.homeworkStudentId,overdueOnly:true\}/);
+  assert.match(html, /最古の期限/);
+  assert.match(html, /\.overdueStudent\{[^}]*grid-template-columns/);
+});
