@@ -30,6 +30,18 @@ test("生徒・講師・管理者の既存画面を維持する", () => {
   assert.match(html, /管理者/);
 });
 
+test("五科目の色と共通カード・ボタンを統一する", () => {
+  assert.match(html, /--subject-english:#e53935/);
+  assert.match(html, /--subject-math:#fb8c00/);
+  assert.match(html, /--subject-science:#43a047/);
+  assert.match(html, /--subject-social:#1e88e5/);
+  assert.match(html, /--subject-japanese:#8e24aa/);
+  assert.match(html, /--card-radius:17px/);
+  assert.match(html, /--control-radius:11px/);
+  assert.match(html, /subjectBadge_/);
+  assert.match(html, /subjectClass_/);
+});
+
 test("埋込みJavaScriptを構文解析できる", () => {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map((match) => match[1]);
   assert.ok(scripts.length > 0);
