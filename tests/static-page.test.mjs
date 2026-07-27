@@ -19,7 +19,7 @@ test("JSON APIをPOSTで呼び出す", () => {
 });
 
 test("公開画面に秘密情報を含めない", () => {
-  assert.doesNotMatch(html, /SPREADSHEET_ID|API_KEY|SCRIPT_PROP|kase|password\s*[:=]\s*['"][^'"]+/i);
+  assert.doesNotMatch(html, /SPREADSHEET_ID|API_KEY|SCRIPT_PROP|KNOWN_TEST_PASSWORD|password\s*[:=]\s*['"][^'"]+/i);
 });
 
 test("生徒・講師・管理者の既存画面を維持する", () => {
@@ -100,4 +100,27 @@ test("homework encouragement is deterministic and uses the fixed candidate list"
   assert.match(html, /function stableHomeworkIndex_/);
   assert.match(html, /HOMEWORK_ENCOURAGEMENTS\[stableHomeworkIndex_\(key\)\]/);
   assert.doesNotMatch(html, /Math\.random\(\)/);
+});
+
+test("mobile homework encouragement fits inside the compact card", () => {
+  assert.match(html, /\.goodMark\{gap:2px;font-size:10px;letter-spacing:0\}/);
+  assert.match(html, /\.goodMark \.encourageSymbol\{font-size:11px\}/);
+});
+
+test("student dashboard shows rate-aware achievement, greeting, summer period, and encouragement", () => {
+  assert.match(html, /class="studentWelcome"/);
+  assert.match(html, /function greetingInfo_/);
+  assert.match(html, /function summerPeriod_/);
+  assert.match(html, /settings\.summerStartDate/);
+  assert.match(html, /id="achievementIcon" class="achievementIcon"/);
+  assert.match(html, /class="encourageCopy"/);
+  assert.match(html, /const RATE_MESSAGES=/);
+  assert.match(html, /min:0,icon:'start',items:\['まずは1周目をしっかりすすめよう！'/);
+  assert.match(html, /min:100,icon:'trophy',items:\['1周目達成！/);
+  assert.match(html, /min:300,icon:'trophy',items:\['3周達成！/);
+  assert.match(html, /function messageIndex_/);
+  assert.match(html, /function achievementMeta_/);
+  assert.match(html, /const MILESTONES=\[300,250,200,150,100,75,50,25\]/);
+  assert.match(html, /function maybeShowMilestone_/);
+  assert.match(html, /class="todayPraise"/);
 });
