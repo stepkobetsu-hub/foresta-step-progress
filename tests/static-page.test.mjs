@@ -55,10 +55,11 @@ test("mobile target rows stay horizontal and clamp titles to two lines", () => {
   assert.match(html, /\.targetRow\{min-height:34px;padding:3px 6px\}/);
 });
 
-test("progress rows group STEP with the unit name and LCT with its buttons", () => {
+test("progress rows group the unit identity and show LCT only for eligible units", () => {
   assert.match(html, /class="unitIdentity"><span class="unitStep">/);
   assert.match(html, /class="unitTitle unitName"/);
-  assert.match(html, /class="lctButtons"><span class="lctLabel">LCT<\/span>/);
+  assert.match(html, /unit\.hasLct\?/);
+  assert.match(html, /LCTなし/);
   assert.match(html, /\.unitIdentity\{display:flex;align-items:center;gap:\.75em/);
   assert.doesNotMatch(html, /LCT実施日/);
 });
@@ -76,10 +77,11 @@ test("remembered login is opt-in, separated by login type, and does not auto-log
   assert.doesNotMatch(html, /restoreRememberedLogin_[\s\S]{0,200}\.submit\(/);
 });
 
-test("student homework keeps both types in one compact two-column card", () => {
+test("student homework renders every material-specific item in one compact card", () => {
   assert.match(html, /class="home studentHomework/);
-  assert.match(html, /class="homeItems">\$\{item\(redo\)\}\$\{item\(exercise\)\}/);
-  assert.match(html, /\.studentHomework \.homeItems\{grid-template-columns:1fr 1fr;gap:8px\}/);
+  assert.match(html, /group\.items\.map\(item\)\.join\(''\)/);
+  assert.match(html, /MEMORIZATION_MARK:'暗記マーク（基本文の暗記）'/);
+  assert.match(html, /MY_VOCABULARY:'My単語帳（英語→日本語テスト）'/);
   assert.match(html, /学習 \$\{formatShortDate_\(group\.learningDate\)\}　宿題 \$\{formatShortDate_\(group\.assignedDate\)\}/);
   assert.match(html, /-webkit-line-clamp:2/);
 });
@@ -110,7 +112,7 @@ test("mobile homework encouragement fits inside the compact card", () => {
 test("student navigation has only the three daily-use tabs", () => {
   assert.match(html, /data-page="homework"[^>]*>📚 次回の宿題<\/button>/);
   assert.match(html, /data-page="progress"[^>]*>✏️ 進捗入力<\/button>/);
-  assert.match(html, /data-page="targets"[^>]*>🎯 夏期範囲<\/button>/);
+  assert.match(html, /data-page="targets"[^>]*>🎯 目標範囲<\/button>/);
   assert.doesNotMatch(html, /data-page="history"/);
   assert.match(html, /getStudentInputHistory/);
 });
@@ -122,14 +124,15 @@ test("student landing selects homework first and progress only when homework is 
   assert.match(html, /if\(out\.role==='STUDENT'\)\{state\.studentPage='homework';state\.studentLandingPending=true\}/);
 });
 
-test("mobile login title fits Foresta Step on one line", () => {
-  assert.match(html, /\.hero h1\{font-size:32px;white-space:nowrap\}/);
+test("mobile titles and three primary tabs remain readable on narrow Android screens", () => {
+  assert.match(html, /\.hero h1\{font-size:28px;white-space:nowrap\}/);
+  assert.match(html, /\.viewTabs button\{[^}]*font-size:clamp\(14px,4\.2vw,16px\)[^}]*white-space:nowrap/);
 });
 
-test("student dashboard shows rate-aware achievement, greeting, summer period, and encouragement", () => {
+test("student dashboard shows rate-aware achievement, greeting, goal period, and encouragement", () => {
   assert.match(html, /class="studentWelcome"/);
   assert.match(html, /function greetingInfo_/);
-  assert.match(html, /function summerPeriod_/);
+  assert.match(html, /function goalPeriod_/);
   assert.match(html, /settings\.summerStartDate/);
   assert.match(html, /id="achievementIcon" class="achievementIcon"/);
   assert.match(html, /class="encourageCopy"/);
@@ -142,6 +145,15 @@ test("student dashboard shows rate-aware achievement, greeting, summer period, a
   assert.match(html, /const MILESTONES=\[300,250,200,150,100,75,50,25\]/);
   assert.match(html, /function maybeShowMilestone_/);
   assert.match(html, /class="todayPraise"/);
+});
+
+test("Step and Goal are selectable in parallel without overwriting each other", () => {
+  assert.match(html, /series:'FORESTA_STEP'/);
+  assert.match(html, /data-series="\$\{series\}"/);
+  assert.match(html, /FORESTA_STEP','FORESTA_GOAL/);
+  assert.match(html, /unit\.subject===state\.subject&&unit\.series===state\.series/);
+  assert.match(html, /setOwnTargetChanges',\{subject:state\.subject,series:state\.series/);
+  assert.match(html, /フォレスタゴールを選んでも、フォレスタステップの選択は変わりません/);
 });
 
 test("achievement popups use stable server selections and remain responsive", () => {
