@@ -75,3 +75,29 @@ test("remembered login is opt-in, separated by login type, and does not auto-log
   assert.match(html, /updateRememberedLogin_\(loginType,enteredId,enteredPassword,\$\('rememberLogin'\)\.checked\)/);
   assert.doesNotMatch(html, /restoreRememberedLogin_[\s\S]{0,200}\.submit\(/);
 });
+
+test("student homework keeps both types in one compact two-column card", () => {
+  assert.match(html, /class="home studentHomework/);
+  assert.match(html, /class="homeItems">\$\{item\(redo\)\}\$\{item\(exercise\)\}/);
+  assert.match(html, /\.studentHomework \.homeItems\{grid-template-columns:1fr 1fr;gap:8px\}/);
+  assert.match(html, /学習 \$\{formatShortDate_\(group\.learningDate\)\}　宿題 \$\{formatShortDate_\(group\.assignedDate\)\}/);
+  assert.match(html, /-webkit-line-clamp:2/);
+});
+
+test("homework controls remain compact and preserve existing statuses", () => {
+  assert.match(html, /data-status="DECLARED_DONE"[^>]*>やりました/);
+  assert.match(html, /data-status="NO_TARGET_CLAIM"[^>]*>対象なし/);
+  assert.match(html, /data-no-target-undo="true"/);
+  assert.match(html, />済 \$\{formatShortDate_\(date\)\}<\/button>/);
+  assert.match(html, /min-height:44px/);
+  assert.match(html, /teacherStatus!=='UNCONFIRMED'/);
+});
+
+test("homework encouragement is deterministic and uses the fixed candidate list", () => {
+  for (const message of ["🌟 GOOD!", "✨ GREAT!", "👏 その調子！", "🎉 ナイス！", "⭐ よくできました！", "💮 ばっちり！", "👍 いいね！", "🚩 一歩前進！", "🏆 すばらしい！", "😊 よくがんばったね！"]) {
+    assert.match(html, new RegExp(message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(html, /function stableHomeworkIndex_/);
+  assert.match(html, /HOMEWORK_ENCOURAGEMENTS\[stableHomeworkIndex_\(key\)\]/);
+  assert.doesNotMatch(html, /Math\.random\(\)/);
+});
