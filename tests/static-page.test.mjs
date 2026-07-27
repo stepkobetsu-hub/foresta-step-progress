@@ -152,6 +152,8 @@ test("Step and Goal are selectable in parallel without overwriting each other", 
   assert.match(html, /data-series="\$\{series\}"/);
   assert.match(html, /FORESTA_STEP','FORESTA_GOAL/);
   assert.match(html, /unit\.subject===state\.subject&&unit\.series===state\.series/);
+  assert.match(html, /hasSelectedUnits=d\.units\.some\(unit=>unit\.subject===state\.subject&&unit\.series===nextSeries\)/);
+  assert.match(html, /state\.studentPage==='progress'&&!hasSelectedUnits\)state\.studentPage='targets'/);
   assert.match(html, /setOwnTargetChanges',\{subject:state\.subject,series:state\.series/);
   assert.match(html, /フォレスタゴールを選んでも、フォレスタステップの選択は変わりません/);
 });

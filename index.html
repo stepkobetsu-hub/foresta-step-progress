@@ -249,11 +249,11 @@
   function bindSubjectTabs(){document.querySelectorAll('[data-subject]').forEach(button=>button.onclick=()=>{state.subject=button.dataset.subject;renderStudent()})}
   function seriesInfo_(series){return series==='FORESTA_GOAL'?{label:'フォレスタゴール',purpose:'入試対策'}:{label:'フォレスタステップ',purpose:'復習用'}}
   function materialTabsHtml_(d){return `<div class="materialTabs">${['FORESTA_STEP','FORESTA_GOAL'].map(series=>{const info=seriesInfo_(series),available=d.selectableUnits.some(unit=>unit.series===series);return `<button data-series="${series}" class="${state.series===series?'active':''}" ${available?'':'disabled'}>${esc(info.label)}<span>${esc(info.purpose)}</span></button>`}).join('')}</div>`}
-  function bindMaterialTabs_(){document.querySelectorAll('[data-series]').forEach(button=>button.onclick=()=>{state.series=button.dataset.series;renderStudent()})}
+  function bindMaterialTabs_(d){document.querySelectorAll('[data-series]').forEach(button=>button.onclick=()=>{const nextSeries=button.dataset.series,hasSelectedUnits=d.units.some(unit=>unit.subject===state.subject&&unit.series===nextSeries);state.series=nextSeries;if(state.studentPage==='progress'&&!hasSelectedUnits)state.studentPage='targets';renderStudent()})}
   function renderProgressPage_(d,subjects){
     const units=d.units.filter(unit=>unit.subject===state.subject&&unit.series===state.series),info=seriesInfo_(state.series),hasLct=units.some(unit=>unit.hasLct);
     $('studentBody').innerHTML=`${materialTabsHtml_(d)}<div class="subjectTabs">${subjects}</div><section class="card panel subjectSurface ${subjectClass_(state.subject)}"><div class="panelHead"><div><p class="eyebrow">${esc(info.purpose)}｜${esc(info.label)}${esc(state.subject)}｜選択した目標範囲</p><h2>${hasLct?'LCT・':''}学習チェック</h2></div><span class="badge">${units.length}単元</span></div>${hasLct?'<div class="lctGuide"><b>LCTの判定</b><span>◎ 全問正解</span><span>○ 1問間違い</span><span>× 2問以上間違い</span></div>':''}<div class="progressColumns"><span>教材・単元名</span><span>周回</span><span>${hasLct?'LCT判定':'LCTなし'}</span><span>Point</span><span>WU</span><span>TRY</span><span>学習日</span></div><div class="unitList">${units.map(unitHtml).join('')||'<div class="empty">目標範囲が未選択です。「目標範囲」から選んでください。</div>'}</div></section>`;
-    bindMaterialTabs_();
+    bindMaterialTabs_(d);
     bindSubjectTabs();
     bindUnitAutoSave_(units);
   }
@@ -312,7 +312,7 @@
     const groups=groupByChapter_(units);
     const rangeOptions=units.map((unit,index)=>`<option value="${index}">${esc(unit.stepCode)} ${esc(unit.unitTitle)}</option>`).join('');
     $('studentBody').innerHTML=`${materialTabsHtml_(d)}<div class="subjectTabs">${subjects}</div><section class="card panel subjectSurface ${subjectClass_(state.subject)}"><div class="panelHead"><div><p class="eyebrow">${esc(info.purpose)}｜${esc(info.label)}${esc(state.subject)}</p><h2>目標範囲を選ぶ</h2></div><span id="targetSaveState" class="saveState"></span></div><p class="rangeHelp">教材ごとに目標範囲を保存します。フォレスタゴールを選んでも、フォレスタステップの選択は変わりません。チェック変更は自動保存されます。</p><div id="selectionSummary" class="selectionSummary"></div>${units.length?`<div class="bulkActions"><button id="selectAll" class="smallBtn">すべて選択</button><button id="clearAll" class="smallBtn">すべて外す</button></div><div class="rangePicker"><label>開始単元<select id="rangeStart">${rangeOptions}</select></label><label>終了単元<select id="rangeEnd">${rangeOptions}</select></label><button id="applyRange" class="smallBtn">この範囲を選択</button><button id="removeRange" class="smallBtn">この範囲を外す</button></div>`:''}<div class="unitList">${groups.map(group=>`<section class="chapterBlock" data-chapter-block="${esc(group.key)}"><div class="chapterHeader"><label><input type="checkbox" data-chapter-check="${esc(group.key)}"><span>${esc(group.label)}（${group.units.length}単元）</span></label><div class="chapterActions"><button class="smallBtn" data-chapter-select="${esc(group.key)}">章をすべて選択</button><button class="smallBtn" data-chapter-clear="${esc(group.key)}">章をすべて外す</button></div></div><div class="targetRows">${group.units.map(targetUnitHtml).join('')}</div></section>`).join('')||'<div class="empty">この教材・科目で選択できる単元はありません</div>'}</div></section>`;
-    bindMaterialTabs_();
+    bindMaterialTabs_(d);
     bindSubjectTabs();
     bindTargetAutoSave_(units);
   }
