@@ -107,6 +107,25 @@ test("mobile homework encouragement fits inside the compact card", () => {
   assert.match(html, /\.goodMark \.encourageSymbol\{font-size:11px\}/);
 });
 
+test("student navigation has only the three daily-use tabs", () => {
+  assert.match(html, /data-page="homework"[^>]*>📚 次回の宿題<\/button>/);
+  assert.match(html, /data-page="progress"[^>]*>✏️ 進捗入力<\/button>/);
+  assert.match(html, /data-page="targets"[^>]*>🎯 夏期範囲<\/button>/);
+  assert.doesNotMatch(html, /data-page="history"/);
+  assert.match(html, /getStudentInputHistory/);
+});
+
+test("student landing selects homework first and progress only when homework is empty", () => {
+  assert.match(html, /studentLandingPending:true/);
+  assert.match(html, /const homeworkCount=Array\.isArray\(state\.homeworkCache\.homework\)\?state\.homeworkCache\.homework\.length:0/);
+  assert.match(html, /state\.studentPage=homeworkCount>0\?'homework':'progress'/);
+  assert.match(html, /if\(out\.role==='STUDENT'\)\{state\.studentPage='homework';state\.studentLandingPending=true\}/);
+});
+
+test("mobile login title fits Foresta Step on one line", () => {
+  assert.match(html, /\.hero h1\{font-size:32px;white-space:nowrap\}/);
+});
+
 test("student dashboard shows rate-aware achievement, greeting, summer period, and encouragement", () => {
   assert.match(html, /class="studentWelcome"/);
   assert.match(html, /function greetingInfo_/);
