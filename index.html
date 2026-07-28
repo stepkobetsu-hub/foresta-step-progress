@@ -9,7 +9,7 @@
     :root{--ink:#16233c;--muted:#68758a;--line:#dfe5ed;--bg:#f3f6fa;--navy:#19315d;--blue:#2b6fc7;--green:#168269;--red:#ba4150;--amber:#a76312}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}
     .top{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;min-height:64px;padding:9px clamp(12px,4vw,42px);border-bottom:1px solid var(--line);background:#fff}.brand{display:flex;align-items:center;gap:10px;font-weight:900}.logo{display:grid;place-items:center;width:43px;height:43px;border-radius:13px;background:linear-gradient(135deg,#7ce0bf,#62a8e8);color:#17305a}.topActions{display:flex;gap:8px;align-items:center}.topActions button{min-height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;color:#46546a}
-    .login{min-height:100vh;display:grid;grid-template-columns:1.08fr .92fr}.hero{display:flex;flex-direction:column;justify-content:center;padding:8vw;background:linear-gradient(145deg,#162b54,#315b91);color:#fff}.hero h1{margin:12px 0;font-size:clamp(38px,6vw,72px);line-height:1.18}.hero p{color:#dce9f6;line-height:1.9}.loginPane{display:grid;place-items:center;padding:24px}.card{border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 12px 36px rgba(28,45,78,.08)}.loginCard{width:min(440px,100%);padding:32px}.tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:5px;border-radius:12px;background:#edf1f6}.tabs button{min-height:42px;border:0;border-radius:9px;background:transparent;font-weight:900}.tabs .active{background:#fff;box-shadow:0 3px 10px #cdd5e2}.field{display:grid;gap:6px;margin-top:17px;font-size:12px;font-weight:900}.field input,.filters input,.filters select{width:100%;min-height:47px;padding:0 13px;border:1px solid #d7deea;border-radius:10px;background:#fff}.rememberLogin{display:grid;gap:4px;margin-top:14px}.rememberChoice{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}.rememberChoice input{width:19px;height:19px;margin:0;accent-color:#2b6fc7}.rememberNote{margin:0 0 0 27px;color:#65758b;font-size:10px}.clearRemembered{justify-self:start;min-height:28px;margin-left:27px;padding:0;border:0;background:transparent;color:#315b93;font-size:10px;text-decoration:underline}.primary{width:100%;min-height:50px;margin-top:18px;border:0;border-radius:11px;background:linear-gradient(135deg,#2854a2,#3476cf);color:#fff;font-weight:900}.error{margin-top:12px;color:var(--red);font-size:12px}.dev{margin-top:18px;padding:10px;border-radius:9px;background:#fff5df;color:#76571f;font-size:11px}
+    .login{min-height:100vh;display:grid;grid-template-columns:1.08fr .92fr}.hero{display:flex;flex-direction:column;justify-content:center;padding:8vw;background:linear-gradient(145deg,#162b54,#315b91);color:#fff}.hero h1{margin:12px 0;font-size:clamp(38px,6vw,72px);line-height:1.18}.hero p{color:#dce9f6;line-height:1.9}.loginPane{display:grid;place-items:center;padding:24px}.card{border:1px solid var(--line);border-radius:18px;background:#fff;box-shadow:0 12px 36px rgba(28,45,78,.08)}.loginCard{width:min(440px,100%);padding:32px}.loginStatus{min-height:20px;margin-top:10px;color:var(--blue);font-size:12px;font-weight:800}.loginStatus.success{color:var(--green)}.tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:5px;border-radius:12px;background:#edf1f6}.tabs button{min-height:42px;border:0;border-radius:9px;background:transparent;font-weight:900}.tabs .active{background:#fff;box-shadow:0 3px 10px #cdd5e2}.field{display:grid;gap:6px;margin-top:17px;font-size:12px;font-weight:900}.field input,.filters input,.filters select{width:100%;min-height:47px;padding:0 13px;border:1px solid #d7deea;border-radius:10px;background:#fff}.rememberLogin{display:grid;gap:4px;margin-top:14px}.rememberChoice{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}.rememberChoice input{width:19px;height:19px;margin:0;accent-color:#2b6fc7}.rememberNote{margin:0 0 0 27px;color:#65758b;font-size:10px}.clearRemembered{justify-self:start;min-height:28px;margin-left:27px;padding:0;border:0;background:transparent;color:#315b93;font-size:10px;text-decoration:underline}.primary{width:100%;min-height:50px;margin-top:18px;border:0;border-radius:11px;background:linear-gradient(135deg,#2854a2,#3476cf);color:#fff;font-weight:900}.error{margin-top:12px;color:var(--red);font-size:12px}.dev{margin-top:18px;padding:10px;border-radius:9px;background:#fff5df;color:#76571f;font-size:11px}
     main{width:min(1280px,calc(100% - 28px));margin:0 auto;padding:16px 0 60px}.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}.head h1{margin:1px 0;font-size:clamp(25px,3vw,32px)}.muted{color:var(--muted)}.eyebrow{margin:0;color:#577198;font-size:10px;font-weight:900;letter-spacing:.08em}.metrics{display:flex;gap:7px}.metric{min-width:100px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:#fff}.metric span{display:block;color:var(--muted);font-size:10px}.metric b{font-size:19px}
     .subjectTabs{display:flex;gap:8px;margin:15px 0;overflow:auto}.subjectTabs button{min-width:96px;padding:12px;border:1px solid var(--line);border-radius:13px;background:#fff;text-align:left}.subjectTabs .active{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}.subjectTabs b{float:right;color:var(--blue)}
     .materialTabs{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:10px 0}.materialTabs button{min-height:50px;padding:8px 12px;border:1px solid var(--line);border-radius:13px;background:#fff;color:#40516b;font-weight:900;text-align:left}.materialTabs button span{display:block;color:var(--muted);font-size:10px;font-weight:700}.materialTabs button.active{border-color:#2b6fc7;background:#eaf3ff;box-shadow:inset 0 0 0 1px #2b6fc7;color:#1e5597}.materialTabs button:disabled{opacity:.48;cursor:not-allowed}
@@ -118,7 +118,8 @@
         <button id="clearRemembered" class="clearRemembered hidden" type="button">保存したログイン情報を消す</button>
       </div>
       <button class="primary" id="loginButton">ログイン</button>
-      <div id="loginError" class="error"></div>
+      <div id="loginStatus" class="loginStatus" role="status" aria-live="polite"></div>
+      <div id="loginError" class="error" role="alert"></div>
       <div class="dev">開発・テスト環境です。本番データの入力には使用しないでください。</div>
     </form></div>
   </section>
@@ -130,7 +131,7 @@
   <div id="toast" class="toast hidden"></div>
 <script>
   const HOMEWORK_ENCOURAGEMENTS=['🌟 GOOD!','✨ GREAT!','👏 その調子！','🎉 ナイス！','⭐ よくできました！','💮 ばっちり！','👍 いいね！','🚩 一歩前進！','🏆 すばらしい！','😊 よくがんばったね！'];
-  const state={loginType:'student',token:'',role:'',profile:null,studentPage:'homework',studentLandingPending:true,subject:'数学',series:'FORESTA_STEP',adminPage:'students',adminDetail:'',homeworkStudentId:'',settingsOpen:false,targetStudent:'',adminFilters:{campus:'',grade:'',name:'',showActive:true,showInactive:false,homeworkStatus:''},dashboardCache:null,homeworkCache:null,pendingSaves:0,unitQueues:new Map(),roundByUnit:{},targetQueue:null};
+  const state={loginType:'student',token:'',role:'',profile:null,loginInFlight:false,studentPage:'homework',studentLandingPending:true,subject:'数学',series:'FORESTA_STEP',adminPage:'students',adminDetail:'',homeworkStudentId:'',settingsOpen:false,targetStudent:'',adminFilters:{campus:'',grade:'',name:'',showActive:true,showInactive:false,homeworkStatus:''},dashboardCache:null,homeworkCache:null,pendingSaves:0,unitQueues:new Map(),roundByUnit:{},targetQueue:null};
   const $=id=>document.getElementById(id);
   const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const pct=value=>value==null?'—':Math.round(Number(value)*100)+'%';
@@ -138,28 +139,32 @@
   const subjectBadge_=subject=>`<span class="subjectBadge ${subjectClass_(subject)}">${esc(subject)}</span>`;
   const REMEMBER_KEYS={type:'forestaProgress.loginType',student:{enabled:'forestaProgress.rememberLogin.student',id:'forestaProgress.savedId.student',passKey:'forestaProgress.savedPassword.student'},staff:{enabled:'forestaProgress.rememberLogin.staff',id:'forestaProgress.savedId.staff',passKey:'forestaProgress.savedPassword.staff'}};
   const API_URL='https://script.google.com/macros/s/AKfycbwu8lfhiH3_7m4ogHNtbgeo3ehx_VBMnt1mPXsvIlL_kMSpxFdrRD4rO_I6q_JUXIWHmg/exec';
-  async function rpc(payload){
-    const controller=new AbortController();
-    const timeout=setTimeout(()=>controller.abort(),30000);
-    try{
-      const response=await fetch(API_URL,{
-        method:'POST',
-        headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify(payload),
-        cache:'no-store',
-        redirect:'follow',
-        signal:controller.signal
-      });
-      if(!response.ok)throw new Error('通信に失敗しました。（HTTP '+response.status+'）');
-      const result=await response.json();
-      if(!result||typeof result!=='object')throw new Error('サーバーから正しい応答を受信できませんでした。');
-      return result;
-    }catch(error){
-      if(error&&error.name==='AbortError')throw new Error('通信がタイムアウトしました。もう一度お試しください。');
-      throw error instanceof Error?error:new Error('通信に失敗しました。');
-    }finally{
-      clearTimeout(timeout);
+  const sleep_=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  function loginTrace_(stage,started,detail={}){console.info('[login]',stage,{elapsedMs:Math.round(performance.now()-started),at:new Date().toISOString(),...detail})}
+  async function rpc(payload,options={}){
+    const attempts=Number(options.attempts||1),timeoutMs=Number(options.timeoutMs||15000),started=performance.now();
+    let lastError;
+    for(let attempt=1;attempt<=attempts;attempt+=1){
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),timeoutMs);
+      try{
+        if(options.trace)loginTrace_('api-send',started,{attempt,action:payload.action});
+        const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload),cache:'no-store',redirect:'follow',signal:controller.signal});
+        if(options.trace)loginTrace_('api-response',started,{attempt,httpStatus:response.status});
+        if(!response.ok){const error=new Error(response.status>=500?'サーバーが混み合っています。':'通信に失敗しました。（HTTP '+response.status+'）');error.retryable=response.status>=500||response.status===429;throw error}
+        const result=await response.json();
+        if(!result||typeof result!=='object')throw Object.assign(new Error('サーバーから正しい応答を受信できませんでした。'),{retryable:true});
+        return result;
+      }catch(error){
+        lastError=error;
+        const retryable=error?.retryable||error?.name==='AbortError'||error instanceof TypeError;
+        if(attempt>=attempts||!retryable)break;
+        const delay=attempt*1000;
+        if(options.onRetry)options.onRetry(attempt,delay);
+        await sleep_(delay);
+      }finally{clearTimeout(timeout)}
     }
+    if(lastError?.name==='AbortError')throw new Error('通信に時間がかかっています。再試行しても接続できませんでした。');
+    throw lastError instanceof Error?lastError:new Error('再試行しても接続できませんでした。');
   }
   async function call(action,data={}){const result=await rpc({...data,action,token:state.token});if(!result.success)throw new Error(result.error||'処理に失敗しました。');return result}
   function toast(message){$('toast').textContent=message;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),2500)}
@@ -175,10 +180,35 @@
   function restoreRememberedLogin_(type){const saved=readRememberedLogin_(type);$('loginId').value=saved?.id||'';$('password').value=saved?.password||'';$('rememberLogin').checked=!!saved;$('clearRemembered').classList.toggle('hidden',!hasRememberedLogin_())}
   function updateRememberedLogin_(type,id,password,enabled){try{const keys=REMEMBER_KEYS[type];if(enabled){localStorage.setItem(keys.enabled,'true');localStorage.setItem(keys.id,id);localStorage.setItem(keys.passKey,password);localStorage.setItem(REMEMBER_KEYS.type,type)}else{localStorage.removeItem(keys.enabled);localStorage.removeItem(keys.id);localStorage.removeItem(keys.passKey);if(localStorage.getItem(REMEMBER_KEYS.type)===type)localStorage.removeItem(REMEMBER_KEYS.type)}}catch(error){}}
   function clearAllRememberedLogins_(){try{['student','staff'].forEach(type=>{const keys=REMEMBER_KEYS[type];localStorage.removeItem(keys.enabled);localStorage.removeItem(keys.id);localStorage.removeItem(keys.passKey)});localStorage.removeItem(REMEMBER_KEYS.type)}catch(error){}$('loginId').value='';$('password').value='';$('rememberLogin').checked=false;$('clearRemembered').classList.add('hidden')}
-  function setLoginType(type){state.loginType=type;$('studentTab').classList.toggle('active',type==='student');$('staffTab').classList.toggle('active',type==='staff');$('loginTitle').textContent=type==='student'?'生徒ログイン':'講師・管理者ログイン';$('idLabel').textContent=type==='student'?'生徒番号':'講師番号';$('loginError').textContent='';restoreRememberedLogin_(type)}
+  function setLoginType(type){if(state.loginInFlight)return;state.loginType=type;$('studentTab').classList.toggle('active',type==='student');$('staffTab').classList.toggle('active',type==='staff');$('loginTitle').textContent=type==='student'?'生徒ログイン':'講師・管理者ログイン';$('idLabel').textContent=type==='student'?'生徒番号':'講師番号';$('loginError').textContent='';restoreRememberedLogin_(type)}
   $('studentTab').onclick=()=>setLoginType('student');$('staffTab').onclick=()=>setLoginType('staff');
   $('clearRemembered').onclick=()=>{if(confirm('この端末に保存したIDとパスワードを削除しますか？'))clearAllRememberedLogins_()};
-  $('loginForm').onsubmit=async event=>{event.preventDefault();$('loginButton').disabled=true;$('loginError').textContent='';const loginType=state.loginType,enteredId=$('loginId').value.trim(),enteredPassword=$('password').value;try{const action=loginType==='student'?'studentLogin':'staffLogin';const key=loginType==='student'?'studentId':'code';const out=await rpc({action,[key]:enteredId,password:enteredPassword});if(!out.success)throw new Error(out.error);updateRememberedLogin_(loginType,enteredId,enteredPassword,$('rememberLogin').checked);$('password').value='';state.token=out.token;state.role=out.role;state.profile=out.profile;state.dashboardCache=null;state.homeworkCache=null;if(out.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true}sessionStorage.setItem('fsSession',JSON.stringify({token:out.token,role:out.role,profile:out.profile,expiresAt:out.expiresAt}));await showApp()}catch(error){$('loginError').textContent=error.message||'ログインできませんでした。';if(!state.token){$('application').classList.add('hidden');$('login').classList.remove('hidden')}}finally{$('loginButton').disabled=false}};
+  $('loginForm').onsubmit=async event=>{
+    event.preventDefault();if(state.loginInFlight)return;
+    const button=$('loginButton'),status=$('loginStatus'),started=performance.now(),loginType=state.loginType,enteredId=$('loginId').value.trim(),enteredPassword=$('password').value;
+    if(!enteredId||!enteredPassword){$('loginError').textContent='生徒番号とパスワードを入力してください。';return}
+    state.loginInFlight=true;button.disabled=true;button.textContent='ログインしています…';status.className='loginStatus';status.textContent='認証しています…';$('loginError').textContent='';
+    sessionStorage.removeItem('fsSession');state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;
+    try{
+      loginTrace_('button-pressed',started,{loginType});
+      const action=loginType==='student'?'studentLogin':'staffLogin',key=loginType==='student'?'studentId':'code';
+      const out=await rpc({action,[key]:enteredId,password:enteredPassword},{attempts:3,timeoutMs:12000,trace:true,onRetry:(attempt,delay)=>{status.textContent='サーバーが混み合っています。自動で再試行します…';loginTrace_('retry-scheduled',started,{attempt,delay})}});
+      if(!out.success)throw Object.assign(new Error(out.error||'入力内容が違います。'),{authentication:true});
+      loginTrace_('authentication-complete',started);
+      updateRememberedLogin_(loginType,enteredId,enteredPassword,$('rememberLogin').checked);$('password').value='';
+      state.token=out.token;state.role=out.role;state.profile=out.profile;
+      if(out.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true}
+      sessionStorage.setItem('fsSession',JSON.stringify({token:out.token,role:out.role,profile:out.profile,expiresAt:out.expiresAt}));
+      status.className='loginStatus success';status.textContent='ログインしました';
+      $('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログインしました</h2><p>学習データを読み込んでいます…</p></div></section>';
+      loginTrace_('initial-screen-visible',started);
+      showApp().then(()=>loginTrace_('student-data-visible',started)).catch(error=>renderLoadError(error));
+    }catch(error){
+      loginTrace_('login-failed',started,{kind:error?.authentication?'authentication':'network'});
+      $('loginError').textContent=error?.authentication?(error.message||'入力内容が違います。'):(error.message||'再試行しても接続できませんでした。');
+      status.textContent='';$('application').classList.add('hidden');$('login').classList.remove('hidden');
+    }finally{state.loginInFlight=false;button.disabled=false;button.textContent='ログイン'}
+  };
   $('logout').onclick=async()=>{if(hasPendingSaves_()&&!confirm('保存中の変更があります。保存完了を待ってからログアウトしますか？'))return;const started=Date.now();while(hasPendingSaves_()&&Date.now()-started<10000)await new Promise(resolve=>setTimeout(resolve,100));try{if(state.token)await rpc({action:'logout',token:state.token})}finally{sessionStorage.removeItem('fsSession');state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType)}};
   async function showApp(){$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty">読み込んでいます…</div></section>';try{if(state.role==='STUDENT')await renderStudent();else if(state.role==='TEACHER')await renderTeacher();else await renderAdmin()}catch(error){renderLoadError(error)}}
   function renderLoadError(error){$('main').innerHTML=`<section class="card panel"><div class="empty"><h2>画面を読み込めませんでした</h2><p>${esc(error?.message||'通信に失敗しました。')}</p><div class="homeActions" style="justify-content:center"><button id="retryLoad">再試行</button><button id="errorLogout">ログアウト</button></div></div></section>`;$('retryLoad').onclick=()=>showApp();$('errorLogout').onclick=()=>$('logout').click()}
