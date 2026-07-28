@@ -207,16 +207,29 @@ test("staff homework view renders one overdue card per student and opens filtere
 });
 
 
-test("student login is single-flight, retried only for transient failures, and renders before data hydration", () => {
+test("student login is single-flight, uses one 45-second request, and renders before data hydration", () => {
   assert.match(html, /loginInFlight:false/);
   assert.match(html, /if\(state\.loginInFlight\)return/);
   assert.match(html, /button\.disabled=true;button\.textContent='ログインしています…'/);
-  assert.match(html, /attempts:3,timeoutMs:12000/);
-  assert.match(html, /const delay=attempt\*1000/);
+  assert.match(html, /attempts:1,timeoutMs:45000/);
+  assert.match(html, /timeoutMs=Number\(options\.timeoutMs\|\|45000\)/);
+  assert.doesNotMatch(html, /attempts:3,timeoutMs:12000/);
   assert.match(html, /error\?\.authentication\?'入力内容が違います。'/);
   assert.match(html, /sessionStorage\.setItem\('fsSession'/);
   assert.match(html, /<h2>ログインしました<\/h2><p>学習データを読み込んでいます…<\/p>/);
   assert.match(html, /showApp\(\)\.then/);
+});
+
+
+test("authenticated student data retries never repeat authentication and allow partial rendering", () => {
+  assert.match(html, /ログインは完了しています/);
+  assert.match(html, /学習データを取得できませんでした。「再試行」を押してください。/);
+  assert.match(html, /renderStudentHomeworkOnly_/);
+  assert.match(html, /renderHomeworkLoadError_/);
+  assert.match(html, /state\.homeworkCache=await call\('listHomework'\)/);
+  assert.match(html, /state\.dashboardCache=\(await call\('getStudentDashboard'\)\)\.data/);
+  assert.match(html, /retryLoad'\)\.onclick=\(\)=>showApp\(\)/);
+  assert.doesNotMatch(html, /retryLoad[^\n]+studentLogin/);
 });
 
 test("login timing diagnostics do not log credentials or tokens", () => {
