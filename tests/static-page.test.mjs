@@ -205,3 +205,24 @@ test("staff homework view renders one overdue card per student and opens filtere
   assert.match(html, /最古の期限/);
   assert.match(html, /\.overdueStudent\{[^}]*grid-template-columns/);
 });
+
+
+test("student login is single-flight, retried only for transient failures, and renders before data hydration", () => {
+  assert.match(html, /loginInFlight:false/);
+  assert.match(html, /if\(state\.loginInFlight\)return/);
+  assert.match(html, /button\.disabled=true;button\.textContent='ログインしています…'/);
+  assert.match(html, /attempts:3,timeoutMs:12000/);
+  assert.match(html, /const delay=attempt\*1000/);
+  assert.match(html, /error\?\.authentication\?'入力内容が違います。'/);
+  assert.match(html, /sessionStorage\.setItem\('fsSession'/);
+  assert.match(html, /<h2>ログインしました<\/h2><p>学習データを読み込んでいます…<\/p>/);
+  assert.match(html, /showApp\(\)\.then/);
+});
+
+test("login timing diagnostics do not log credentials or tokens", () => {
+  assert.match(html, /function loginTrace_/);
+  for (const stage of ["button-pressed", "api-send", "api-response", "authentication-complete", "initial-screen-visible", "student-data-visible", "login-failed"]) {
+    assert.match(html, new RegExp(stage));
+  }
+  assert.doesNotMatch(html, /loginTrace_\([^\n]*(password|token)/);
+});
