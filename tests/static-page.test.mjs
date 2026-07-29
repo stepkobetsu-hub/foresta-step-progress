@@ -119,7 +119,7 @@ test("student navigation has only the three daily-use tabs", () => {
 
 test("student landing selects homework first and progress only when homework is empty", () => {
   assert.match(html, /studentLandingPending:true/);
-  assert.match(html, /const homeworkCount=Array\.isArray\(state\.homeworkCache\.homework\)\?state\.homeworkCache\.homework\.length:0/);
+  assert.match(html, /const homeworkCount=Array\.isArray\(state\.homeworkCache\?\.homework\)\?state\.homeworkCache\.homework\.length:0/);
   assert.match(html, /state\.studentPage=homeworkCount>0\?'homework':'progress'/);
   assert.match(html, /if\(out\.role==='STUDENT'\)\{state\.studentPage='homework';state\.studentLandingPending=true\}/);
 });
@@ -214,7 +214,7 @@ test("student login is single-flight, uses one 45-second request, and renders be
   assert.match(html, /attempts:1,timeoutMs:45000/);
   assert.match(html, /timeoutMs=Number\(options\.timeoutMs\|\|45000\)/);
   assert.doesNotMatch(html, /attempts:3,timeoutMs:12000/);
-  assert.match(html, /error\?\.authentication\?'入力内容が違います。'/);
+  assert.match(html, /error\?\.authentication\?\(error\.message\|\|'入力内容が違います。'\)/);
   assert.match(html, /sessionStorage\.setItem\('fsSession'/);
   assert.match(html, /<h2>ログインしました<\/h2><p>学習データを読み込んでいます…<\/p>/);
   assert.match(html, /showApp\(\)\.then/);
@@ -226,10 +226,21 @@ test("authenticated student data retries never repeat authentication and allow p
   assert.match(html, /学習データを取得できませんでした。「再試行」を押してください。/);
   assert.match(html, /renderStudentHomeworkOnly_/);
   assert.match(html, /renderHomeworkLoadError_/);
-  assert.match(html, /state\.homeworkCache=await call\('listHomework'\)/);
-  assert.match(html, /state\.dashboardCache=\(await call\('getStudentDashboard'\)\)\.data/);
+  assert.match(html, /Promise\.allSettled\(\[/);
+  assert.match(html, /needsHomework\?call\('listHomework'\):Promise\.resolve\(null\)/);
+  assert.match(html, /needsDashboard\?call\('getStudentDashboard'\):Promise\.resolve\(null\)/);
+  assert.match(html, /if\(homeworkResult\.status==='fulfilled'\)state\.homeworkCache=homeworkResult\.value/);
+  assert.match(html, /if\(dashboardResult\.status==='fulfilled'\)state\.dashboardCache=dashboardResult\.value\.data/);
   assert.match(html, /retryLoad'\)\.onclick=\(\)=>showApp\(\)/);
   assert.doesNotMatch(html, /retryLoad[^\n]+studentLogin/);
+});
+
+test("student initial homework and dashboard requests run in parallel", () => {
+  const renderStudent = html.match(/async function renderStudent\(\)\{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(renderStudent, /Promise\.allSettled/);
+  assert.match(renderStudent, /call\('listHomework'\)/);
+  assert.match(renderStudent, /call\('getStudentDashboard'\)/);
+  assert.doesNotMatch(renderStudent, /await call\('listHomework'\)[\s\S]*await call\('getStudentDashboard'\)/);
 });
 
 test("login timing diagnostics do not log credentials or tokens", () => {
