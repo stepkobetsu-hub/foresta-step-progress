@@ -1,5 +1,6 @@
+
 // ===== Config.gs =====
-const APP_NAME = 'フォレスタステップ進捗管理【開発】';
+const APP_NAME = '学習進捗管理';
 const MASTER_VERSION = '2026FS';
 const SESSION_HOURS = 8;
 const STUDENT_AUTH_CACHE_SECONDS = 600;
@@ -14,20 +15,33 @@ const HOMEWORK_OVERDUE_RULE = Object.freeze({
 });
 const MATERIAL_SERIES = Object.freeze({
   STEP: 'FORESTA_STEP',
-  GOAL: 'FORESTA_GOAL'
+  GOAL: 'FORESTA_GOAL',
+  VOCABULARY: 'FORESTA_VOCABULARY',
+  REQUIRED_TEXTBOOK: 'REQUIRED_TEXTBOOK'
 });
 const HOMEWORK_TYPES = Object.freeze({
   TRY_REDO: 'TRY_REDO',
   EXERCISE: 'EXERCISE',
   MEMORIZATION_MARK: 'MEMORIZATION_MARK',
-  MY_VOCABULARY: 'MY_VOCABULARY'
+  MY_VOCABULARY: 'MY_VOCABULARY',
+  VOCABULARY_REVIEW: 'VOCABULARY_REVIEW',
+  REQUIRED_REMAINDER: 'REQUIRED_REMAINDER'
 });
 const HOMEWORK_LABELS = Object.freeze({
   TRY_REDO: 'TRY赤×直し',
   EXERCISE: 'Exercise',
   MEMORIZATION_MARK: '暗記マーク（基本文の暗記）',
-  MY_VOCABULARY: 'My単語帳（英語→日本語テスト）'
+  MY_VOCABULARY: 'My単語帳（英語→日本語テスト）',
+  VOCABULARY_REVIEW: '赤×なおしや見直し',
+  REQUIRED_REMAINDER: '赤×なおしとその単元の残り'
 });
+
+const VOCABULARY_LEVELS = Object.freeze(
+  Array.from({length: 20}, (_, index) => (20 - index) + '級')
+    .concat(['初段'])
+    .concat(Array.from({length: 14}, (_, index) => (index + 2) + '段'))
+);
+const VOCABULARY_UNIT_PREFIX = 'FORESTA_VOCABULARY:';
 
 const PROP = Object.freeze({
   PROGRESS_DB_SS_ID: 'PROGRESS_DB_SS_ID',
@@ -137,15 +151,48 @@ function rowSchoolYear_(row) {
 }
 
 function normalizeSeries_(value) {
-  return String(value || '') === MATERIAL_SERIES.GOAL
-    ? MATERIAL_SERIES.GOAL
-    : MATERIAL_SERIES.STEP;
+  const series = String(value || '');
+  if (series === MATERIAL_SERIES.GOAL) return MATERIAL_SERIES.GOAL;
+  if (series === MATERIAL_SERIES.VOCABULARY) return MATERIAL_SERIES.VOCABULARY;
+  if (series === MATERIAL_SERIES.REQUIRED_TEXTBOOK) return MATERIAL_SERIES.REQUIRED_TEXTBOOK;
+  return MATERIAL_SERIES.STEP;
 }
 
 function seriesLabel_(value) {
-  return normalizeSeries_(value) === MATERIAL_SERIES.GOAL
-    ? 'フォレスタゴール'
-    : 'フォレスタステップ';
+  const series = normalizeSeries_(value);
+  if (series === MATERIAL_SERIES.GOAL) return 'フォレスタゴール';
+  if (series === MATERIAL_SERIES.VOCABULARY) return 'フォレスタ英単語';
+  if (series === MATERIAL_SERIES.REQUIRED_TEXTBOOK) return '必修テキスト';
+  return 'フォレスタステップ';
+}
+
+function normalizeVocabularyDirection_(value) {
+  const direction = String(value || '').trim();
+  if (direction === '英→日' || direction === 'EN_JA') return '英→日';
+  if (direction === '日→英' || direction === 'JA_EN') return '日→英';
+  return '';
+}
+
+function vocabularyDirectionCode_(direction) {
+  return normalizeVocabularyDirection_(direction) === '日→英' ? 'JA_EN' : 'EN_JA';
+}
+
+function vocabularyUnitId_(level, direction) {
+  return VOCABULARY_UNIT_PREFIX + vocabularyDirectionCode_(direction) + ':' + String(level || '');
+}
+
+function vocabularyLevelFromUnitId_(unitId) {
+  const value = String(unitId || '');
+  if (value.indexOf(VOCABULARY_UNIT_PREFIX) !== 0) return '';
+  const tail = value.slice(VOCABULARY_UNIT_PREFIX.length);
+  return /^(EN_JA|JA_EN):/.test(tail) ? tail.replace(/^(EN_JA|JA_EN):/, '') : tail;
+}
+
+function vocabularyDirectionFromUnitId_(unitId, legacyRoundNumber) {
+  const tail = String(unitId || '').slice(VOCABULARY_UNIT_PREFIX.length);
+  if (tail.indexOf('JA_EN:') === 0) return '日→英';
+  if (tail.indexOf('EN_JA:') === 0) return '英→日';
+  return Number(legacyRoundNumber) % 2 === 0 ? '日→英' : '英→日';
 }
 
 function unitHasLct_(unit) {
@@ -156,6 +203,9 @@ function unitHasLct_(unit) {
 function homeworkTypesForUnit_(unit) {
   const series = normalizeSeries_(unit && unit.series);
   const subject = String(unit && unit.subject || '');
+  if (series === MATERIAL_SERIES.REQUIRED_TEXTBOOK) {
+    return [HOMEWORK_TYPES.REQUIRED_REMAINDER];
+  }
   if (subject === '英語' && series === MATERIAL_SERIES.GOAL) {
     return [HOMEWORK_TYPES.TRY_REDO, HOMEWORK_TYPES.EXERCISE, HOMEWORK_TYPES.MY_VOCABULARY];
   }
@@ -253,14 +303,16 @@ function setupDatabase() {
   const db = getDb_();
   Object.keys(DB_SCHEMAS).forEach(name => ensureSheet_(db, SHEET_NAMES[name], DB_SCHEMAS[name]));
   const unitResult = seedUnitMaster_();
+  const requiredTextbookResult = seedRequiredTextbookUnits_();
   const rangeResult = seedStandardRanges_();
   seedAppConfig_();
   removeBlankDefaultSheet_(db);
   return {
     success: true,
     sheets: Object.keys(DB_SCHEMAS).map(name => SHEET_NAMES[name]),
-    unitCount: UNIT_MASTER_SEED.length,
-    insertedUnits: unitResult.inserted,
+    unitCount: UNIT_MASTER_SEED.length + requiredTextbookResult.total,
+    insertedUnits: unitResult.inserted + requiredTextbookResult.inserted,
+    insertedRequiredTextbookUnits: requiredTextbookResult.inserted,
     insertedStandardRanges: rangeResult.inserted
   };
 }
@@ -466,66 +518,7 @@ function getCachedSelectableUnits_(grade, subject, series) {
   const normalizedSeries = series ? normalizeSeries_(series) : 'ALL';
   const key = ['FS', 'UNITS', isDevelopment_() ? 'DEV' : 'PROD', MASTER_VERSION, grade, subject || 'ALL', normalizedSeries].join(':');
   const cached = cacheGetLargeJson_(cache, key);
-  if (cached) {
-    perfTrace_('units.selectable', startedAt, {cacheHit: true, rows: cached.length});
-    return cached;
-  }
-  const rows = getRowsAsObjects_('Units')
-    .filter(unit => isTrue_(unit.active))
-    .filter(unit =>
-      String(unit.gradeScope) === String(grade) ||
-      String(unit.gradeScope) === '中1～中3共通' ||
-      (
-        isDevelopment_() &&
-        normalizeSeries_(unit.series) === MATERIAL_SERIES.GOAL &&
-        String(unit.gradeScope) === '中3'
-      )
-    )
-    .filter(unit => !subject || String(unit.subject) === String(subject))
-    .filter(unit => normalizedSeries === 'ALL' || normalizeSeries_(unit.series) === normalizedSeries)
-    .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0))
-    .map(unit => {
-      const copy = Object.assign({}, unit);
-      delete copy._rowNumber;
-      return copy;
-    });
-  const cacheResult = cachePutLargeJson_(cache, key, rows, 21600);
-  perfTrace_('units.selectable', startedAt, {
-    cacheHit: false,
-    rows: rows.length,
-    chunks: cacheResult.chunks,
-    bytes: cacheResult.bytes
-  });
-  return rows;
-}
-
-function getCachedStandardUnitIds_(grade, subject, series) {
-  const cache = CacheService.getScriptCache();
-  const normalizedSeries = series ? normalizeSeries_(series) : 'ALL';
-  const key = ['FS', 'STANDARD', isDevelopment_() ? 'DEV' : 'PROD', MASTER_VERSION, grade, subject || 'ALL', normalizedSeries].join(':');
-  const cached = cache.get(key);
-  if (cached) return JSON.parse(cached);
-  const ids = getRowsAsObjects_('StandardRanges')
-    .filter(row => String(row.grade) === String(grade))
-    .filter(row => !subject || String(row.subject) === String(subject))
-    .filter(row => normalizedSeries === 'ALL' || normalizeSeries_(row.series) === normalizedSeries)
-    .filter(row => String(row.included).toLowerCase() !== 'false')
-    .map(row => String(row.unitId));
-  cache.put(key, JSON.stringify(ids), 21600);
-  return ids;
-}
-
-function invalidateStaticDataCache_() {
-  const cache = CacheService.getScriptCache();
-  cache.removeAll([
-      ['FS','UNIT_MAP',isDevelopment_()?'DEV':'PROD',MASTER_VERSION].join(':'),
-      ['FS','UNIT_SUBJECTS',isDevelopment_()?'DEV':'PROD',MASTER_VERSION].join(':')
-    ]);
-  ['中1','中2','中3'].forEach(grade =>
-      ['', '英語','数学','国語','理科','社会'].flatMap(subject =>
-        ['ALL', MATERIAL_SERIES.STEP, MATERIAL_SERIES.GOAL].map(series => {
-          const unitKey = ['FS','UNITS',isDe…197703 tokens truncated…,
-    homeworkId: redo.homeworkId,
+  i…200992 tokens truncated…omeworkId: redo.homeworkId,
     studentStatus: 'DECLARED_DONE'
   });
   const confirm = api({
@@ -982,5 +975,9 @@ function resetDevelopmentTestUnitData_(studentId, unitIds) {
     rows.forEach(rowNumber => sheet.deleteRow(rowNumber));
   });
 }
+
+
+
+
 
 
