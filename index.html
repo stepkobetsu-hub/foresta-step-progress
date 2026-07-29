@@ -213,6 +213,14 @@
   $('logout').onclick=async()=>{if(hasPendingSaves_()&&!confirm('保存中の変更があります。保存完了を待ってからログアウトしますか？'))return;const started=Date.now();while(hasPendingSaves_()&&Date.now()-started<10000)await new Promise(resolve=>setTimeout(resolve,100));try{if(state.token)await rpc({action:'logout',token:state.token})}finally{sessionStorage.removeItem('fsSession');state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType)}};
   async function showApp(){$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログインしました</h2><p>学習データの読み込みに時間がかかっています。</p></div></section>';try{if(state.role==='STUDENT')await renderStudent();else if(state.role==='TEACHER')await renderTeacher();else await renderAdmin()}catch(error){renderLoadError(error)}}
   function renderLoadError(error){
+    const errorMessage=String(error?.message||'');
+    if(errorMessage.includes('ログインが必要')||errorMessage.includes('LOGIN_REQUIRED')){
+      sessionStorage.removeItem('fsSession');state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;
+      $('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');
+      $('loginError').textContent='ログインの有効期限が切れました。もう一度ログインしてください。';
+      restoreRememberedLogin_(state.loginType);
+      return;
+    }
     const authenticated=!!state.token;
     const title=authenticated?'ログインは完了しています':'画面を読み込めませんでした';
     const message=authenticated?'学習データを取得できませんでした。「再試行」を押してください。':(error?.message||'通信に失敗しました。');
