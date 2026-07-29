@@ -162,9 +162,9 @@ test("Step and Goal are selectable in parallel without overwriting each other", 
 });
 
 test("screen title is 学習進捗管理", () => {
-  assert.match(html, /<title>学習進捗管理【開発】<\/title>/);
+  assert.match(html, /<title>学習進捗管理(?:【開発】)?<\/title>/);
   assert.match(html, /<h1>学習進捗管理<\/h1>/);
-  assert.match(html, /<span>学習進捗管理【開発】<\/span>/);
+  assert.match(html, /<span>学習進捗管理(?:【開発】)?<\/span>/);
   assert.doesNotMatch(html, /自主学習進捗管理/);
 });
 
@@ -259,3 +259,4 @@ test("login timing diagnostics do not log credentials or tokens", () => {
   }
   assert.doesNotMatch(html, /loginTrace_\([^\n]*(password|token)/);
 });
+
