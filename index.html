@@ -174,7 +174,7 @@
   async function call(action,data={}){const result=await rpc({...data,action,token:state.token});if(!result.success)throw new Error(result.error||'処理に失敗しました。');return result}
   function toast(message){$('toast').textContent=message;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),2500)}
   let saveStatusTimer;
-  function setGlobalSave_(message,type='',linger=0){const box=$('globalSave');if(!box)return;clearTimeout(saveStatusTimer);box.textContent=message;box.className=`globalSave ${type}`;if(linger)saveStatusTimer=setTimeout(()=>box.classList.add('hidden'),linger)}`;document.body.classList.toggle('savingBusy',type==='saving');if(linger)saveStatusTimer=setTimeout(()=>box.classList.add('hidden'),linger)}
+  function setGlobalSave_(message,type='',linger=0){const box=$('globalSave');if(!box)return;clearTimeout(saveStatusTimer);box.textContent=message;box.className=`globalSave ${type}`;if(linger)saveStatusTimer=setTimeout(()=>box.classList.add('hidden'),linger)}
   function beginSave_(count=1){state.pendingSaves+=count;setGlobalSave_('保存中…','saving')}
   function endSave_(message='保存済み'){state.pendingSaves=Math.max(0,state.pendingSaves-1);if(state.pendingSaves)setGlobalSave_('保存中…','saving');else setGlobalSave_(message,'',2200)}
   function failSave_(message='保存に失敗しました［再試行］'){state.pendingSaves=Math.max(0,state.pendingSaves-1);setGlobalSave_(message,'failed')}
