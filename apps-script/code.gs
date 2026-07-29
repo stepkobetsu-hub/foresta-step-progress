@@ -25411,6 +25411,21 @@ function isTrue_(value) {
   return value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
 }
 
+function filterUnitsForProfile_(profile, units) {
+  const grade = String(profile && profile.grade || '');
+  return (Array.isArray(units) ? units : []).filter(unit => {
+    const gradeScope = String(unit && unit.gradeScope || '');
+    return !gradeScope ||
+      gradeScope === grade ||
+      gradeScope === '中1～中3共通' ||
+      (
+        isDevelopment_() &&
+        normalizeSeries_(unit && unit.series) === MATERIAL_SERIES.GOAL &&
+        gradeScope === '中3'
+      );
+  });
+}
+
 function getSelectableUnitsForProfile_(profile, units) {
   return filterUnitsForProfile_(profile, units)
     .filter(unit => isTrue_(unit.active))
