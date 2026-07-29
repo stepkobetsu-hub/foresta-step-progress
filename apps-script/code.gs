@@ -7,6 +7,7 @@ const STUDENT_AUTH_CACHE_SECONDS = 600;
 const STUDENT_AUTH_NOT_FOUND_SECONDS = 120;
 const STUDENT_AUTH_CACHE_VERSION_KEY = 'FS:AUTH:VERSION';
 let requestDb_ = null;
+let requestFilteredRowsCache_ = null;
 const SCHOOL_YEAR = 2026;
 const STUDY_ROUNDS = Object.freeze([1, 2, 3]);
 // 期限日の何日後から未完了一覧へ表示するか。1 は「期限日の翌日から」を表す。
@@ -358,6 +359,8 @@ function rowsFromValues_(headers, values, firstRowNumber) {
 }
 
 function getRowsByFieldValue_(sheetName, fieldName, fieldValue) {
+  const cacheKey = sheetName + '|' + fieldName + '|' + String(fieldValue);
+  if (requestFilteredRowsCache_ && requestFilteredRowsCache_.has(cacheKey)) return requestFilteredRowsCache_.get(cacheKey);
   const startedAt = Date.now();
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName] || [];
@@ -373,6 +376,7 @@ function getRowsByFieldValue_(sheetName, fieldName, fieldValue) {
     .sort((a, b) => a - b);
   if (!matches.length) {
     perfTrace_('sheet.filteredRead', startedAt, {sheet: sheetName, rows: 0});
+    if (requestFilteredRowsCache_) requestFilteredRowsCache_.set(cacheKey, []);
     return [];
   }
   const groups = [];
@@ -387,6 +391,7 @@ function getRowsByFieldValue_(sheetName, fieldName, fieldValue) {
     group.start
   ));
   perfTrace_('sheet.filteredRead', startedAt, {sheet: sheetName, rows: result.length, ranges: groups.length});
+  if (requestFilteredRowsCache_) requestFilteredRowsCache_.set(cacheKey, result);
   return result;
 }
 
@@ -431,6 +436,21 @@ function updateObjectRow_(sheetName, rowNumber, object) {
   sheet.getRange(rowNumber, 1, 1, next.length).setValues([next]);
 }
 
+function syncFilteredRowsCache_(sheetName, rows) {
+  if (!requestFilteredRowsCache_) return;
+  requestFilteredRowsCache_.forEach((cached, key) => {
+    if (!key.startsWith(sheetName + '|')) return;
+    const parts = key.split('|'), fieldName = parts[1], fieldValue = parts.slice(2).join('|');
+    rows.forEach(row => {
+      const index = cached.findIndex(item => Number(item._rowNumber) === Number(row._rowNumber));
+      const matches = String(row[fieldName] == null ? '' : row[fieldName]) === fieldValue;
+      if (index >= 0 && matches) cached[index] = row;
+      else if (index >= 0) cached.splice(index, 1);
+      else if (matches) cached.push(row);
+    });
+  });
+}
+
 function appendObjectsFast_(sheetName, objects) {
   if (!objects || !objects.length) return;
   const sheet = getSheet_(sheetName);
@@ -438,7 +458,9 @@ function appendObjectsFast_(sheetName, objects) {
   const values = objects.map(object =>
     headers.map(header => object[header] == null ? '' : object[header])
   );
-  sheet.getRange(sheet.getLastRow() + 1, 1, values.length, headers.length).setValues(values);
+  const startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 1, values.length, headers.length).setValues(values);
+  syncFilteredRowsCache_(sheetName, objects.map((object, index) => Object.assign({}, object, {_rowNumber: startRow + index})));
 }
 
 function updateObjectRowFast_(sheetName, current, changes) {
@@ -447,6 +469,7 @@ function updateObjectRowFast_(sheetName, current, changes) {
   const next = Object.assign({}, current || {}, changes || {});
   sheet.getRange(Number(current._rowNumber), 1, 1, headers.length)
     .setValues([headers.map(header => next[header] == null ? '' : next[header])]);
+  syncFilteredRowsCache_(sheetName, [Object.assign({}, next, {_rowNumber: Number(current._rowNumber)})]);
 }
 
 function replaceAllObjectRowsFast_(sheetName, rows, previousCount) {
