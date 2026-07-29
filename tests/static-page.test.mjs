@@ -237,10 +237,19 @@ test("authenticated student data retries never repeat authentication and allow p
 
 test("student initial homework and dashboard requests run in parallel", () => {
   const renderStudent = html.match(/async function renderStudent\(\)\{([\s\S]*?)\n  \}/)?.[1] || "";
+  assert.match(renderStudent, /const dashboardPromise=call\('getStudentDashboard'\)/);
+  assert.match(renderStudent, /state\.homeworkCache=await call\('listHomework'\)/);
+  assert.match(renderStudent, /await renderStudentHomeworkOnly_\(\)/);
+  assert.match(renderStudent, /dashboardPromise\.then\(out=>\{state\.dashboardCache=out\.data;return renderStudent\(\)\}\)/);
   assert.match(renderStudent, /Promise\.allSettled/);
   assert.match(renderStudent, /call\('listHomework'\)/);
   assert.match(renderStudent, /call\('getStudentDashboard'\)/);
-  assert.doesNotMatch(renderStudent, /await call\('listHomework'\)[\s\S]*await call\('getStudentDashboard'\)/);
+});
+
+test("student homework becomes visible without waiting for the full dashboard", () => {
+  assert.match(html, /if\(state\.homeworkCache\)\{\s*state\.studentLandingPending=false;\s*await renderStudentHomeworkOnly_\(\);/);
+  assert.match(html, /dashboardPromise\.then/);
+  assert.match(html, /return\s*\n\s*\}/);
 });
 
 test("login timing diagnostics do not log credentials or tokens", () => {
