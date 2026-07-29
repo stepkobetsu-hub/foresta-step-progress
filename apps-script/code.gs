@@ -24261,7 +24261,7 @@ function createSession_(userType, userId, role, permissionLevel) {
     expiresAt: expiresAt.toISOString(),
     revokedAt: ''
   };
-  appendObject_('Sessions', sessionRow);
+  appendObjectsFast_('Sessions', [sessionRow]);
   cacheSessionRow_(sessionRow);
   perfTrace_('session.create', startedAt, {userType});
   return {token: rawToken, expiresAt: expiresAt.toISOString()};
@@ -24500,16 +24500,25 @@ function getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series,
 
 function getStudentDashboard_(session, requestedStudentId) {
   const startedAt = Date.now();
+  const timing = {};
   const studentId = resolveStudentId_(session, requestedStudentId, [ROLE.TEACHER, ROLE.ADMIN]);
+  let stageStartedAt = Date.now();
   const profile = getCachedStudentProfile_(studentId);
+  timing.studentProfileMs = Date.now() - stageStartedAt;
   if (!profile) throw new Error('生徒情報が見つかりません。');
+  stageStartedAt = Date.now();
   const studentTargets = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
   const targets = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', studentTargets);
+  timing.targetsMs = Date.now() - stageStartedAt;
   const targetSet = new Set(targets);
+  stageStartedAt = Date.now();
   const studentProgress = getRowsByFieldValue_('UnitProgress', 'studentId', studentId)
     .filter(row => rowSchoolYear_(row) === SCHOOL_YEAR);
+  timing.progressMs = Date.now() - stageStartedAt;
   const progress = studentProgress.filter(row => targetSet.has(String(row.unitId)));
+  stageStartedAt = Date.now();
   const selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+  timing.unitMasterMs = Date.now() - stageStartedAt;
   const units = selectableUnits.filter(row => targetSet.has(String(row.unitId)));
   const selectableById = new Map(selectableUnits.map(unit => [String(unit.unitId), unit]));
   const progressMap = new Map(progress.map(row => [
@@ -24527,10 +24536,12 @@ function getStudentDashboard_(session, requestedStudentId) {
     const done = rounds.reduce((sum, round) => sum + round.completedCount, 0);
     return {subject, targetCount: ids.length, completedCount: done, progressRate: ids.length ? done / ids.length : null, rounds};
   });
+  stageStartedAt = Date.now();
   const homework = filterHomeworkByLessonProgress_(
     getRowsByFieldValue_('Homework', 'studentId', studentId),
     studentProgress
   );
+  timing.homeworkMs = Date.now() - stageStartedAt;
   const today = todayInJapan_();
   const todayProgress = studentProgress.filter(row =>
     dateOnly_(row.learningDate) === today
@@ -24544,6 +24555,7 @@ function getStudentDashboard_(session, requestedStudentId) {
   ).length;
   let reachedMilestones = [];
   let milestoneRows = [];
+  stageStartedAt = Date.now();
   try {
     milestoneRows = getRowsByFieldValue_('Milestones', 'studentId', studentId);
     reachedMilestones = milestoneRows
@@ -24552,6 +24564,7 @@ function getStudentDashboard_(session, requestedStudentId) {
   } catch (ignored) {
     reachedMilestones = [];
   }
+  timing.milestonesMs = Date.now() - stageStartedAt;
   const roundProgress = STUDY_ROUNDS.map(roundNumber => {
     const completedCount = targets.filter(unitId => {
       const row = progressMap.get(progressRoundKey_(unitId, roundNumber));
@@ -24665,6 +24678,9 @@ function getStudentDashboard_(session, requestedStudentId) {
     lastStudentInputAt: studentProgress.map(row => row.studentUpdatedAt).filter(Boolean).sort().pop() || ''
   };
   dashboard.achievements = achievementState_(studentId, percent, subjects, milestoneRows);
+  timing.calculationAndResponseMs = Math.max(0, Date.now() - startedAt - Object.keys(timing).reduce((sum, key) => sum + Number(timing[key] || 0), 0));
+  timing.totalServerMs = Date.now() - startedAt;
+  dashboard._timing = timing;
   perfTrace_('dashboard.complete', startedAt, {
     student: maskedStudentId_(studentId),
     progressRows: studentProgress.length,
@@ -26183,13 +26199,24 @@ function toClientSafe_(value) {
 
 function routePublicApi_(action, input) {
   if (action === 'studentLogin') {
+    const totalStartedAt = Date.now();
+    let stageStartedAt = Date.now();
     const auth = authenticateStudent_(input.studentId, input.password);
+    const authenticationMs = Date.now() - stageStartedAt;
+    stageStartedAt = Date.now();
     const session = createSession_('STUDENT', auth.profile.studentId, auth.role, '');
+    const sessionMs = Date.now() - stageStartedAt;
     authTrace_('auth.sessionCreate', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId)});
-    upsertStudentProfile_(auth.profile);
-    authTrace_('auth.profileSync', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId)});
+    stageStartedAt = Date.now();
+    const cachedProfile = getCachedStudentProfile_(auth.profile.studentId);
+    const profileFields = ['name','campus','grade','gradeJRaw','gradeKRaw','gradeConflict','school','enrollmentStatus'];
+    const profileChanged = !cachedProfile || profileFields.some(key => String(cachedProfile[key] == null ? '' : cachedProfile[key]) !== String(auth.profile[key] == null ? '' : auth.profile[key]));
+    if (profileChanged) upsertStudentProfile_(auth.profile);
+    else cacheStudentProfile_(Object.assign({}, cachedProfile, auth.profile));
+    const profileSyncMs = Date.now() - stageStartedAt;
+    authTrace_('auth.profileSync', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId), changed: profileChanged});
     authTrace_('auth.complete', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId)});
-    return {success: true, profile: auth.profile, role: auth.role, token: session.token, expiresAt: session.expiresAt};
+    return {success: true, profile: auth.profile, role: auth.role, token: session.token, expiresAt: session.expiresAt, _timing:{authenticationMs,sessionMs,profileSyncMs,totalServerMs:Date.now()-totalStartedAt}};
   }
   if (action === 'staffLogin') {
     const auth = authenticateStaff_(input.code, input.password);
