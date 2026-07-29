@@ -24686,6 +24686,7 @@ function saveStudentProgressBatch_(session, input) {
     return true;
   });
   const startedAt = Date.now();
+  requestFilteredRowsCache_ = new Map();
   const results = deduped.map(change => {
     try {
       return saveStudentProgress_(session, change);
@@ -24693,7 +24694,9 @@ function saveStudentProgressBatch_(session, input) {
       return {success:false,unitId:String(change.unitId||''),roundNumber:Number(change.roundNumber||1),clientRevision:Number(change.clientRevision||0),clientMutationId:String(change.clientMutationId||''),error:error&&error.message?error.message:'保存に失敗しました。'};
     }
   });
-  return {success:true,requestedCount:changes.length,savedCount:results.filter(result=>result.success).length,failedCount:results.filter(result=>!result.success).length,elapsedMs:Date.now()-startedAt,results};
+  const response = {success:true,requestedCount:changes.length,savedCount:results.filter(result=>result.success).length,failedCount:results.filter(result=>!result.success).length,elapsedMs:Date.now()-startedAt,results};
+  requestFilteredRowsCache_ = null;
+  return response;
 }
 
 function saveStudentProgress_(session, input) {
