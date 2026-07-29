@@ -111,7 +111,7 @@
     @keyframes saveHourglassFlip{0%,35%{transform:rotate(0deg)}50%,85%{transform:rotate(180deg)}100%{transform:rotate(360deg)}}
     @keyframes saveButtonPulse{0%,100%{box-shadow:0 8px 22px rgba(24,72,145,.28)}50%{box-shadow:0 8px 30px rgba(43,111,199,.55)}}
     .globalSave.saving{animation:saveButtonPulse 1.25s ease-in-out infinite}.globalSave.saving::before{display:inline-block;animation:saveHourglassFlip 1.25s ease-in-out infinite}
-    @media(max-width:600px){#globalSave.globalSave{right:10px;top:72px;bottom:auto;width:min(280px,calc(100vw - 20px));min-width:240px;max-width:280px;min-height:52px;padding:9px 18px;border-width:2px;font-size:14px;box-shadow:0 8px 22px rgba(24,72,145,.28)}}
+    @media(max-width:600px){#globalSave.globalSave{right:10px;top:72px;bottom:auto;width:min(320px,calc(100vw - 20px));min-width:280px;max-width:320px;min-height:52px;padding:9px 18px;border-width:2px;font-size:14px;box-shadow:0 8px 22px rgba(24,72,145,.28)}}
   </style>
 </head>
 <body>
@@ -181,7 +181,7 @@
   function setGlobalSave_(message,type='',linger=0){const box=$('globalSave');if(!box)return;clearTimeout(saveStatusTimer);box.textContent=message;box.className=`globalSave ${type}`;box.disabled=type==='saving'||type==='blocking';if(linger)saveStatusTimer=setTimeout(()=>box.classList.add('hidden'),linger)}
   function saveNow_(){if(state.progressBatchTimer){clearTimeout(state.progressBatchTimer);state.progressBatchTimer=null;flushProgressBatch_()}const queue=state.targetQueue;if(queue?.timer){clearTimeout(queue.timer);queue.timer=null;queue.flush?.()}}
   $('globalSave').onclick=saveNow_;
-  function beginSave_(count=1){state.pendingSaves+=count;setGlobalSave_('保存中…','saving')}
+  function beginSave_(count=1){state.pendingSaves+=count;setGlobalSave_('保存中…しばらくお待ちください','saving')}
   function endSave_(message='保存済み'){state.pendingSaves=Math.max(0,state.pendingSaves-1);if(state.pendingSaves)setGlobalSave_('保存中…','saving');else setGlobalSave_(message,'',2200)}
   function failSave_(message='保存に失敗しました［再試行］'){state.pendingSaves=Math.max(0,state.pendingSaves-1);setGlobalSave_(message,'failed')}
   function hasPendingSaves_(){return state.pendingSaves>0||!!state.progressBatchTimer||state.progressBatchInFlight||Array.from(state.unitQueues.values()).some(queue=>queue.pending)||!!(state.targetQueue&&(state.targetQueue.timer||state.targetQueue.inFlight))}
