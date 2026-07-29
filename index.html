@@ -274,7 +274,7 @@
       if(!out.success)throw new Error(out.error||'進捗データを取得できませんでした。');
       if(state.loggingOut||lifecycle!==state.lifecycleId)return;
       state.dashboardCache=out.data;saveStudentViewCache_();await renderStudent();
-    }catch(error){if(state.loggingOut||lifecycle!==state.lifecycleId||error?.name==='AbortError')return;await renderStudentHomeworkOnly_(error)}
+    }catch(error){if(state.loggingOut||lifecycle!==state.lifecycleId||error?.name==='AbortError')return;console.error('[dashboard-load-failed] '+String(error?.message||error));await renderStudentHomeworkOnly_(error)}
   }
   function renderHomeworkLoadError_(error){
     const body=$('studentBody');if(!body)return;
