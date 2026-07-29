@@ -232,8 +232,13 @@
   }
   async function renderStudent(){
     let homeworkError=null,dashboardError=null;
-    if(state.studentLandingPending&&!state.homeworkCache){try{state.homeworkCache=await call('listHomework')}catch(error){homeworkError=error}}
-    if(!state.dashboardCache){try{state.dashboardCache=(await call('getStudentDashboard')).data}catch(error){dashboardError=error}}
+    const needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;
+    const [homeworkResult,dashboardResult]=await Promise.allSettled([
+      needsHomework?call('listHomework'):Promise.resolve(null),
+      needsDashboard?call('getStudentDashboard'):Promise.resolve(null)
+    ]);
+    if(needsHomework){if(homeworkResult.status==='fulfilled')state.homeworkCache=homeworkResult.value;else homeworkError=homeworkResult.reason}
+    if(needsDashboard){if(dashboardResult.status==='fulfilled')state.dashboardCache=dashboardResult.value.data;else dashboardError=dashboardResult.reason}
     if(!state.dashboardCache&&state.homeworkCache){state.studentLandingPending=false;await renderStudentHomeworkOnly_(dashboardError);return}
     if(!state.dashboardCache){renderLoadError(dashboardError||homeworkError);return}
     if(state.studentLandingPending){
