@@ -190,6 +190,11 @@
   function saveStoredSession_(value,persist){const json=JSON.stringify(value);sessionStorage.setItem('fsSession',json);try{if(persist)localStorage.setItem(PERSISTED_SESSION_KEY,json);else localStorage.removeItem(PERSISTED_SESSION_KEY)}catch(error){}}
   function readStoredSession_(){try{return JSON.parse(sessionStorage.getItem('fsSession')||((hasRememberedLogin_()&&localStorage.getItem(PERSISTED_SESSION_KEY))||'null'))}catch(error){return null}}
   function clearStoredSession_(){sessionStorage.removeItem('fsSession');try{localStorage.removeItem(PERSISTED_SESSION_KEY)}catch(error){}}
+  const STUDENT_VIEW_CACHE_PREFIX='forestaProgress.viewCache:';
+  function studentViewCacheKey_(){return STUDENT_VIEW_CACHE_PREFIX+String(state.profile?.studentId||state.profile?.id||'')}
+  function loadStudentViewCache_(){if(state.role!=='STUDENT'||!state.profile)return;try{const cached=JSON.parse(localStorage.getItem(studentViewCacheKey_())||'null');if(!cached||String(cached.studentId)!==String(state.profile.studentId||state.profile.id))return;state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null}catch(error){}}
+  function saveStudentViewCache_(){if(state.role!=='STUDENT'||!state.profile)return;try{localStorage.setItem(studentViewCacheKey_(),JSON.stringify({studentId:String(state.profile.studentId||state.profile.id),savedAt:Date.now(),dashboard:state.dashboardCache,homework:state.homeworkCache}))}catch(error){}}
+  function clearStudentViewCache_(){if(!state.profile)return;try{localStorage.removeItem(studentViewCacheKey_())}catch(error){}}
   function readRememberedLogin_(type){try{const keys=REMEMBER_KEYS[type];if(localStorage.getItem(keys.enabled)!=='true')return null;const id=localStorage.getItem(keys.id)||'',password=localStorage.getItem(keys.passKey)||'';return id&&password?{id,password}:null}catch(error){return null}}
   function hasRememberedLogin_(){return !!(readRememberedLogin_('student')||readRememberedLogin_('staff'))}
   function restoreRememberedLogin_(type){const saved=readRememberedLogin_(type);$('loginId').value=saved?.id||'';$('password').value=saved?.password||'';$('rememberLogin').checked=!!saved;$('clearRemembered').classList.toggle('hidden',!hasRememberedLogin_())}
@@ -212,7 +217,7 @@
       loginTrace_('authentication-complete',started);
       updateRememberedLogin_(loginType,enteredId,enteredPassword,$('rememberLogin').checked);$('password').value='';
       state.token=out.token;state.role=out.role;state.profile=out.profile;
-      if(out.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true}
+      if(out.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}
       saveStoredSession_({token:out.token,role:out.role,profile:out.profile,expiresAt:out.expiresAt},$('rememberLogin').checked);
       status.className='loginStatus success';status.textContent='ログインしました';
       $('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログインしました</h2><p>学習データを読み込んでいます…</p></div></section>';
@@ -224,9 +229,10 @@
       status.textContent='';$('application').classList.add('hidden');$('login').classList.remove('hidden');
     }finally{state.loginInFlight=false;button.disabled=false;button.textContent='ログイン'}
   };
-  $('logout').onclick=async()=>{const button=$('logout');if(button.disabled)return;button.disabled=true;try{if(hasPendingSaves_()){setGlobalSave_('保存中です。しばらくお待ちください。','blocking');while(hasPendingSaves_())await new Promise(resolve=>setTimeout(resolve,100));setGlobalSave_('保存済み','',2200)}if(!await confirmLogout_())return;if(state.token)await rpc({action:'logout',token:state.token});clearStoredSession_();state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType)}catch(error){toast(error.message||'ログアウトできませんでした。')}finally{button.disabled=false}};
+  $('logout').onclick=async()=>{const button=$('logout');if(button.disabled)return;button.disabled=true;try{if(hasPendingSaves_()){setGlobalSave_('保存中です。しばらくお待ちください。','blocking');while(hasPendingSaves_())await new Promise(resolve=>setTimeout(resolve,100));setGlobalSave_('保存済み','',2200)}if(!await confirmLogout_())return;if(state.token)await rpc({action:'logout',token:state.token});clearStudentViewCache_();clearStoredSession_();state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType)}catch(error){toast(error.message||'ログアウトできませんでした。')}finally{button.disabled=false}};
   function confirmLogout_(){return new Promise(resolve=>{const old=$('logoutConfirm');if(old)old.remove();const modal=document.createElement('div');modal.id='logoutConfirm';modal.className='logoutConfirm';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-labelledby','logoutConfirmTitle');modal.innerHTML='<div class="logoutConfirmCard"><h2 id="logoutConfirmTitle">ログアウトしますか？</h2><p>保存済みの内容はそのまま残ります。</p><div class="logoutConfirmActions"><button type="button" class="logoutCancel">キャンセル</button><button type="button" class="logoutProceed">ログアウト</button></div></div>';const finish=value=>{modal.remove();resolve(value)};modal.querySelector('.logoutCancel').onclick=()=>finish(false);modal.querySelector('.logoutProceed').onclick=()=>finish(true);modal.onclick=event=>{if(event.target===modal)finish(false)};document.body.appendChild(modal);modal.querySelector('.logoutCancel').focus()})}
-  async function showApp(){$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログインしました</h2><p>学習データの読み込みに時間がかかっています。</p></div></section>';try{if(state.role==='STUDENT')await renderStudent();else if(state.role==='TEACHER')await renderTeacher();else await renderAdmin()}catch(error){renderLoadError(error)}}
+  function renderStudentShell_(){const name=esc(state.profile?.name||'');$('main').innerHTML=`<div class="studentWelcome"><div><p class="eyebrow">学習進捗管理</p><h1>${name}さん</h1><div class="muted">必要なデータから順に読み込んでいます</div></div></div><div class="viewTabs"><button class="active">📚 次回の宿題</button><button>✏️ 進捗入力</button><button>🎯 目標範囲</button></div><section class="card panel"><div class="panelHead"><h2>宿題チェック</h2><span class="badge">読込中…</span></div><div class="unitList"><div class="unit">宿題を読み込んでいます…</div><div class="unit">画面はこのまま操作できます</div></div></section>`}
+  async function showApp(){$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';if(state.role==='STUDENT')renderStudentShell_();else $('main').innerHTML='<section class="card panel"><div class="empty"><p>データを読み込んでいます…</p></div></section>';try{if(state.role==='STUDENT')await renderStudent();else if(state.role==='TEACHER')await renderTeacher();else await renderAdmin()}catch(error){renderLoadError(error)}}
   function renderLoadError(error){
     const errorMessage=String(error?.message||'');
     if(errorMessage.includes('ログインが必要')||errorMessage.includes('LOGIN_REQUIRED')){
@@ -257,27 +263,25 @@
   async function renderStudent(){
     let homeworkError=null,dashboardError=null;
     let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;
-    if(needsHomework&&needsDashboard){
-      const dashboardPromise=call('getStudentDashboard');
-      try{state.homeworkCache=await call('listHomework')}catch(error){homeworkError=error}
+    if(state.studentLandingPending&&state.homeworkCache){
+      state.studentLandingPending=false;await renderStudentHomeworkOnly_();
+      if(needsDashboard)setTimeout(()=>call('getStudentDashboard').then(out=>{state.dashboardCache=out.data;saveStudentViewCache_()}).catch(()=>{}),0);
+      return
+    }
+    if(needsHomework){
+      try{state.homeworkCache=await call('listHomework');saveStudentViewCache_()}catch(error){homeworkError=error}
       if(state.homeworkCache){
-        state.studentLandingPending=false;
-        await renderStudentHomeworkOnly_();
-        dashboardPromise.then(out=>{state.dashboardCache=out.data;return renderStudent()}).catch(error=>{
-          const retry=$('retryDashboard');if(retry)retry.onclick=()=>renderStudent().catch(renderLoadError);
-          loginTrace_('dashboard-load-failed',performance.now(),{message:'dashboard unavailable'})
-        });
+        state.studentLandingPending=false;await renderStudentHomeworkOnly_();
+        if(needsDashboard)setTimeout(()=>call('getStudentDashboard').then(out=>{state.dashboardCache=out.data;saveStudentViewCache_()}).catch(error=>loginTrace_('dashboard-load-failed',Date.now(),{message:'dashboard unavailable'})),0);
         return
       }
-      try{state.dashboardCache=(await dashboardPromise).data}catch(error){dashboardError=error}
-      needsHomework=false;needsDashboard=false;
     }
     const [homeworkResult,dashboardResult]=await Promise.allSettled([
       needsHomework?call('listHomework'):Promise.resolve(null),
       needsDashboard?call('getStudentDashboard'):Promise.resolve(null)
     ]);
-    if(needsHomework){if(homeworkResult.status==='fulfilled')state.homeworkCache=homeworkResult.value;else homeworkError=homeworkResult.reason}
-    if(needsDashboard){if(dashboardResult.status==='fulfilled')state.dashboardCache=dashboardResult.value.data;else dashboardError=dashboardResult.reason}
+    if(needsHomework){if(homeworkResult.status==='fulfilled'){state.homeworkCache=homeworkResult.value;saveStudentViewCache_()}else homeworkError=homeworkResult.reason}
+    if(needsDashboard){if(dashboardResult.status==='fulfilled'){state.dashboardCache=dashboardResult.value.data;saveStudentViewCache_()}else dashboardError=dashboardResult.reason}
     if(!state.dashboardCache&&state.homeworkCache){state.studentLandingPending=false;await renderStudentHomeworkOnly_(dashboardError);return}
     if(!state.dashboardCache){renderLoadError(dashboardError||homeworkError);return}
     if(state.studentLandingPending){
@@ -545,7 +549,7 @@
   async function renderStandardRanges(){const out=await call('listUnitMaster');const eligible=out.units.filter(u=>u.standardEligible);const summaries=out.units.filter(u=>u.unitType==='SUMMARY');const preSteps=out.units.filter(u=>u.unitType==='PRE_STEP');$('adminBody').innerHTML=`<section class="card panel"><div class="panelHead"><div><h2>進行表（範囲基準）</h2><p class="muted">標準対象 ${eligible.length}単元｜まとめ ${summaries.length}単元（標準対象）｜プレステップ ${preSteps.length}単元（標準対象外）</p></div></div><div class="unitList">${out.units.map(u=>`<article class="unit ${subjectClass_(u.subject)} ${typeClass_(u)}">${subjectBadge_(u.subject)} <span class="badge">${esc(u.seriesLabel||seriesInfo_(u.series).label)}</span> <b>${esc(u.gradeScope)}｜${esc(u.stepCode)} ${esc(u.unitTitle)} ${typeBadge_(u)}</b><div class="muted">${u.standardEligible?'<span class="badge">標準対象</span>':'<span class="badge danger">標準対象外</span>'}${u.hasLct?'<span class="badge">LCTあり</span>':'<span class="badge">LCTなし</span>'}</div></article>`).join('')}</div></section>`}
   async function renderTargetManager(students){if(!state.targetStudent&&students.length)state.targetStudent=String(students[0].studentId);if(!state.targetStudent){$('adminBody').innerHTML='<section class="card empty">対象生徒がいません</section>';return}const selectedStudent=students.find(s=>String(s.studentId)===state.targetStudent);const [dash,master]=await Promise.all([call('getStudentDashboard',{studentId:state.targetStudent}),call('listUnitMaster')]);const targetIds=new Set(dash.data.units.map(u=>String(u.unitId)));const candidates=master.units.filter(u=>u.gradeScope===selectedStudent?.grade||u.gradeScope==='中1～中3共通');$('adminBody').innerHTML=`<section class="card panel"><div class="panelHead"><div><h2>生徒別目標調整</h2><p class="muted">通常・まとめ・プレステップを生徒ごとに調整できます。既存の個別設定は標準範囲変更後も保持されます。</p></div><select id="targetStudent">${students.map(s=>`<option value="${esc(s.studentId)}" ${String(s.studentId)===state.targetStudent?'selected':''}>${esc(s.name)}（${esc(s.grade)}・${esc(s.campus)}）</option>`).join('')}</select></div><div class="metric"><span>現在の目標</span><b>${dash.data.overall.targetCount}</b></div><div class="unitList" style="margin-top:14px">${candidates.map(u=>{const included=targetIds.has(String(u.unitId));return `<article class="unit ${subjectClass_(u.subject)} ${typeClass_(u)}">${subjectBadge_(u.subject)} <b>${esc(u.stepCode)} ${esc(u.unitTitle)} ${typeBadge_(u)}</b><div class="homeActions"><button data-target-unit="${esc(u.unitId)}" data-included="${included?'false':'true'}">${included?'目標から外す':'目標へ追加'}</button></div></article>`}).join('')}</div></section>`;$('targetStudent').onchange=()=>{state.targetStudent=$('targetStudent').value;showApp()};document.querySelectorAll('[data-target-unit]').forEach(button=>button.onclick=async()=>{await call('setStudentTarget',{studentId:state.targetStudent,unitId:button.dataset.targetUnit,included:button.dataset.included==='true'});toast('生徒別目標を更新しました');showApp()})}
   let initialLoginType='student';try{const savedType=localStorage.getItem(REMEMBER_KEYS.type);if(savedType==='student'||savedType==='staff')initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);
-  (async()=>{let resumed=false;const saved=readStoredSession_();try{if(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now())){state.token=saved.token;state.role=saved.role;state.profile=saved.profile;if(saved.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true}$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=saved.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログイン情報を復元しています</h2><p>そのままお待ちください。</p></div></section>';await call('getSession');resumed=true;await showApp()}}catch(error){clearStoredSession_();state.token='';state.role='';state.profile=null}if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden')}}})();
+  (async()=>{let resumed=false;const saved=readStoredSession_();try{if(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now())){state.token=saved.token;state.role=saved.role;state.profile=saved.profile;if(saved.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=saved.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログイン情報を復元しています</h2><p>そのままお待ちください。</p></div></section>';await call('getSession');resumed=true;await showApp()}}catch(error){clearStoredSession_();state.token='';state.role='';state.profile=null}if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden')}}})();
 </script>
 </body>
 </html>
