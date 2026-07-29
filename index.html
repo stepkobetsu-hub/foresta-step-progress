@@ -232,7 +232,22 @@
   }
   async function renderStudent(){
     let homeworkError=null,dashboardError=null;
-    const needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;
+    let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;
+    if(needsHomework&&needsDashboard){
+      const dashboardPromise=call('getStudentDashboard');
+      try{state.homeworkCache=await call('listHomework')}catch(error){homeworkError=error}
+      if(state.homeworkCache){
+        state.studentLandingPending=false;
+        await renderStudentHomeworkOnly_();
+        dashboardPromise.then(out=>{state.dashboardCache=out.data;return renderStudent()}).catch(error=>{
+          const retry=$('retryDashboard');if(retry)retry.onclick=()=>renderStudent().catch(renderLoadError);
+          loginTrace_('dashboard-load-failed',performance.now(),{message:'dashboard unavailable'})
+        });
+        return
+      }
+      try{state.dashboardCache=(await dashboardPromise).data}catch(error){dashboardError=error}
+      needsHomework=false;needsDashboard=false;
+    }
     const [homeworkResult,dashboardResult]=await Promise.allSettled([
       needsHomework?call('listHomework'):Promise.resolve(null),
       needsDashboard?call('getStudentDashboard'):Promise.resolve(null)
