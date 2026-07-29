@@ -270,7 +270,7 @@
     if(state.loggingOut)return;
     const lifecycle=state.lifecycleId;
     try{
-      const out=await rpc({action:'getStudentDashboard',token:state.token},{attempts:1,timeoutMs:15000});
+      const out=await rpc({action:'getStudentDashboard',token:state.token},{attempts:1,timeoutMs:45000});
       if(!out.success)throw new Error(out.error||'進捗データを取得できませんでした。');
       if(state.loggingOut||lifecycle!==state.lifecycleId)return;
       state.dashboardCache=out.data;saveStudentViewCache_();await renderStudent();
