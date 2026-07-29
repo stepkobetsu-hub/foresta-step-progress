@@ -24651,6 +24651,28 @@ function getStudentDashboard_(session, requestedStudentId) {
   return dashboard;
 }
 
+function saveStudentProgressBatch_(session, input) {
+  requireRole_(session, [ROLE.STUDENT, ROLE.ADMIN]);
+  const changes = Array.isArray(input.changes) ? input.changes.slice(0, 50) : [];
+  if (!changes.length) throw publicError_('保存する変更がありません。', 'PROGRESS_CHANGES_REQUIRED');
+  const seen = new Set();
+  const deduped = changes.filter(change => {
+    const key = String(change.unitId || '') + ':' + normalizeRoundNumber_(change.roundNumber);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const startedAt = Date.now();
+  const results = deduped.map(change => {
+    try {
+      return saveStudentProgress_(session, change);
+    } catch (error) {
+      return {success:false,unitId:String(change.unitId||''),roundNumber:Number(change.roundNumber||1),clientRevision:Number(change.clientRevision||0),clientMutationId:String(change.clientMutationId||''),error:error&&error.message?error.message:'保存に失敗しました。'};
+    }
+  });
+  return {success:true,requestedCount:changes.length,savedCount:results.filter(result=>result.success).length,failedCount:results.filter(result=>!result.success).length,elapsedMs:Date.now()-startedAt,results};
+}
+
 function saveStudentProgress_(session, input) {
   requireRole_(session, [ROLE.STUDENT, ROLE.ADMIN]);
   const studentId = resolveStudentId_(session, input.studentId, [ROLE.ADMIN]);
@@ -26172,6 +26194,8 @@ function routeAuthenticatedApi_(action, input, session) {
       return {success: true, history: getStudentInputHistory_(session, input.studentId, input.limit)};
     case 'saveStudentProgress':
       return saveStudentProgress_(session, input);
+    case 'saveStudentProgressBatch':
+      return saveStudentProgressBatch_(session, input);
     case 'listVocabularyProgress':
       return {success: true, data: listVocabularyProgress_(session, input.studentId)};
     case 'saveVocabularyProgress':
