@@ -198,7 +198,7 @@
   function clearStoredSession_(){sessionStorage.removeItem('fsSession');try{localStorage.removeItem(PERSISTED_SESSION_KEY)}catch(error){}}
   const STUDENT_VIEW_CACHE_PREFIX='forestaProgress.viewCache:';
   function studentViewCacheKey_(){return STUDENT_VIEW_CACHE_PREFIX+String(state.profile?.studentId||state.profile?.id||'')}
-  function loadStudentViewCache_(){if(state.role!=='STUDENT'||!state.profile)return;try{const cached=JSON.parse(localStorage.getItem(studentViewCacheKey_())||'null');if(!cached||String(cached.studentId)!==String(state.profile.studentId||state.profile.id))return;state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null}catch(error){}}
+  function loadStudentViewCache_(){if(state.role!=='STUDENT'||!state.profile)return;try{const key=studentViewCacheKey_(),cached=JSON.parse(localStorage.getItem(key)||'null');if(!cached||String(cached.studentId)!==String(state.profile.studentId||state.profile.id)){localStorage.removeItem(key);return}const dashboardValid=!cached.dashboard||(cached.dashboard.overall&&Array.isArray(cached.dashboard.subjects));const homeworkValid=!cached.homework||Array.isArray(cached.homework.homework);if(!dashboardValid||!homeworkValid){localStorage.removeItem(key);state.dashboardCache=null;state.homeworkCache=null;return}state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null}catch(error){try{localStorage.removeItem(studentViewCacheKey_())}catch(ignore){}state.dashboardCache=null;state.homeworkCache=null}}
   function saveStudentViewCache_(){if(state.role!=='STUDENT'||!state.profile)return;try{localStorage.setItem(studentViewCacheKey_(),JSON.stringify({studentId:String(state.profile.studentId||state.profile.id),savedAt:Date.now(),dashboard:state.dashboardCache,homework:state.homeworkCache}))}catch(error){}}
   function clearStudentViewCache_(){if(!state.profile)return;try{localStorage.removeItem(studentViewCacheKey_())}catch(error){}}
   function readRememberedLogin_(type){try{const keys=REMEMBER_KEYS[type];if(localStorage.getItem(keys.enabled)!=='true')return null;const id=localStorage.getItem(keys.id)||'',password=localStorage.getItem(keys.passKey)||'';return id&&password?{id,password}:null}catch(error){return null}}
@@ -258,11 +258,23 @@
   }
   async function renderStudentHomeworkOnly_(dashboardError){
     if(state.loggingOut)return;
-    const home=state.homeworkCache;
-    $('main').innerHTML=`<section class="card panel"><div class="panelHead"><div><p class="eyebrow">ログインしました</p><h2>${esc(state.profile?.name||'')}さんの宿題</h2></div></div><p class="muted">進捗データの読み込みに時間がかかっています。</p><div id="studentBody"></div><div class="homeActions"><button id="retryDashboard">進捗を再試行</button></div></section>`;
+    const failed=!!dashboardError,statusText=failed?'進捗データの読み込みに失敗しました。再試行してください。':'進捗データを読み込んでいます…';
+    $('main').innerHTML=`<div class="viewTabs"><button data-lite-page="homework" class="active">📚 次回の宿題</button><button data-lite-page="progress">✏️ 進捗入力</button><button data-lite-page="targets">🎯 目標範囲</button></div><section class="card panel"><div class="panelHead"><div><p class="eyebrow">ログインしました</p><h2>${esc(state.profile?.name||'')}さんの宿題</h2></div></div><p class="muted">${statusText}</p><div id="studentBody"></div><div class="homeActions"><button id="retryDashboard">${failed?'読み込みに失敗しました。再試行':'進捗データを再試行'}</button></div></section>`;
     await renderStudentHomework_();
-    $('retryDashboard').onclick=()=>renderStudent().catch(renderLoadError);
+    const retry=page=>{state.studentPage=page;state.dashboardCache=null;loadDashboardInBackground_()};
+    document.querySelectorAll('[data-lite-page]').forEach(button=>button.onclick=()=>retry(button.dataset.litePage));
+    $('retryDashboard').onclick=()=>retry(state.studentPage||'homework');
     if(dashboardError)loginTrace_('dashboard-load-failed',performance.now(),{message:'dashboard unavailable'})
+  }
+  async function loadDashboardInBackground_(){
+    if(state.loggingOut)return;
+    const lifecycle=state.lifecycleId;
+    try{
+      const out=await rpc({action:'getStudentDashboard',token:state.token},{attempts:1,timeoutMs:15000});
+      if(!out.success)throw new Error(out.error||'進捗データを取得できませんでした。');
+      if(state.loggingOut||lifecycle!==state.lifecycleId)return;
+      state.dashboardCache=out.data;saveStudentViewCache_();await renderStudent();
+    }catch(error){if(state.loggingOut||lifecycle!==state.lifecycleId||error?.name==='AbortError')return;await renderStudentHomeworkOnly_(error)}
   }
   function renderHomeworkLoadError_(error){
     const body=$('studentBody');if(!body)return;
@@ -275,14 +287,14 @@
     let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;
     if(state.studentLandingPending&&state.homeworkCache){
       state.studentLandingPending=false;await renderStudentHomeworkOnly_();
-      if(needsDashboard)scheduleBackground_(()=>call('getStudentDashboard').then(out=>{state.dashboardCache=out.data;saveStudentViewCache_()}).catch(()=>{}),0);
+      if(needsDashboard)scheduleBackground_(()=>loadDashboardInBackground_(),0);
       return
     }
     if(needsHomework){
       try{state.homeworkCache=await call('listHomework');saveStudentViewCache_()}catch(error){homeworkError=error}
       if(state.homeworkCache){
         state.studentLandingPending=false;await renderStudentHomeworkOnly_();
-        if(needsDashboard)scheduleBackground_(()=>call('getStudentDashboard').then(out=>{state.dashboardCache=out.data;saveStudentViewCache_()}).catch(error=>loginTrace_('dashboard-load-failed',Date.now(),{message:'dashboard unavailable'})),0);
+        if(needsDashboard)scheduleBackground_(()=>loadDashboardInBackground_(),0);
         return
       }
     }
