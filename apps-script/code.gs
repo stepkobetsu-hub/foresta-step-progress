@@ -24105,32 +24105,49 @@ function clearStudentAuthCache() {
 
 
 function getStudentAuthRecord_(studentId) {
+  const timing = {cacheReadMs: 0, idSearchMs: 0, studentRowReadMs: 0, cacheWriteMs: 0};
   const cache = CacheService.getScriptCache();
   const version = getStudentAuthCacheVersion_();
   const authKey = studentAuthCacheKey_(studentId, version);
   const notFoundKey = studentAuthNotFoundCacheKey_(studentId, version);
+  let stageStartedAt = Date.now();
   const cached = cache.get(authKey);
-  if (cached) return {record: JSON.parse(cached), cacheHit: true};
-  if (cache.get(notFoundKey)) return {record: null, cacheHit: true};
+  timing.cacheReadMs += Date.now() - stageStartedAt;
+  if (cached) return {record: JSON.parse(cached), cacheHit: true, timing};
+  stageStartedAt = Date.now();
+  const notFoundCached = cache.get(notFoundKey);
+  timing.cacheReadMs += Date.now() - stageStartedAt;
+  if (notFoundCached) return {record: null, cacheHit: true, timing};
   const master = SpreadsheetApp.openById(getRequiredProperty_(PROP.STUDENT_MASTER_SS_ID));
   const sheet = master.getSheetByName(getRequiredProperty_(PROP.STUDENT_MASTER_SHEET_NAME));
   if (!sheet) throw new Error('生徒マスタの正本シートが見つかりません。');
   const lastRow = sheet.getLastRow();
+  stageStartedAt = Date.now();
   const match = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).createTextFinder(String(studentId)).matchEntireCell(true).findNext() : null;
+  timing.idSearchMs = Date.now() - stageStartedAt;
   if (!match) {
+    stageStartedAt = Date.now();
     cache.put(notFoundKey, '1', STUDENT_AUTH_NOT_FOUND_SECONDS);
-    return {record: null, cacheHit: false};
+    timing.cacheWriteMs = Date.now() - stageStartedAt;
+    return {record: null, cacheHit: false, timing};
   }
   const rowNumber = match.getRow();
+  stageStartedAt = Date.now();
   const record = studentAuthRecordFromRow_(sheet.getRange(rowNumber, 1, 1, 16).getValues()[0], rowNumber);
+  timing.studentRowReadMs = Date.now() - stageStartedAt;
+  stageStartedAt = Date.now();
   cache.put(authKey, JSON.stringify(record), STUDENT_AUTH_CACHE_SECONDS);
-  return {record, cacheHit: false};
+  timing.cacheWriteMs = Date.now() - stageStartedAt;
+  return {record, cacheHit: false, timing};
 }
 
 function authenticateStudent_(studentId, password) {
   const startedAt = Date.now();
+  const timing = {inputNormalizeMs: 0, cacheReadMs: 0, idSearchMs: 0, studentRowReadMs: 0, cacheWriteMs: 0, availabilityCheckMs: 0, passwordCheckMs: 0, profileBuildMs: 0};
+  let stageStartedAt = Date.now();
   const id = String(studentId || '').trim();
   const pass = String(password || '');
+  timing.inputNormalizeMs = Date.now() - stageStartedAt;
   authTrace_('auth.start', startedAt, {student: maskedStudentId_(id)});
   if (!id || !pass) throw publicError_('生徒番号とパスワードを入力してください。', 'LOGIN_REQUIRED');
 
@@ -24141,22 +24158,28 @@ function authenticateStudent_(studentId, password) {
   }
 
   const lookup = getStudentAuthRecord_(id);
+  Object.assign(timing, lookup.timing || {});
   authTrace_('auth.studentLookup', startedAt, {student: maskedStudentId_(id), cacheHit: lookup.cacheHit});
   const record = lookup.record;
   if (!record) throw publicError_('生徒番号またはパスワードが違います。', 'INVALID_CREDENTIALS');
+  stageStartedAt = Date.now();
   if (record.status !== 'ACTIVE') {
     throw publicError_('退塾・休塾等のためログインできません。教室へお問い合わせください。', 'STUDENT_INACTIVE');
   }
+  timing.availabilityCheckMs = Date.now() - stageStartedAt;
+  stageStartedAt = Date.now();
   if (!safeStringEquals_(record.password, pass)) {
     authTrace_('auth.passwordCheck', startedAt, {student: maskedStudentId_(id), success: false});
     throw publicError_('生徒番号またはパスワードが違います。', 'INVALID_CREDENTIALS');
   }
+  timing.passwordCheckMs = Date.now() - stageStartedAt;
   authTrace_('auth.passwordCheck', startedAt, {student: maskedStudentId_(id), success: true});
   const gradeJ = normalizeGrade_(record.gradeJRaw);
   const gradeK = normalizeGrade_(record.gradeKRaw);
   const grade = gradeJ || gradeK;
   if (!grade) throw publicError_('中学生の学年を確認できません。教室へお問い合わせください。', 'GRADE_NOT_FOUND');
-  return {
+  stageStartedAt = Date.now();
+  const result = {
     profile: {
       studentId: id,
       name: record.name,
@@ -24171,8 +24194,12 @@ function authenticateStudent_(studentId, password) {
     },
     permissionLevel: '',
     role: ROLE.STUDENT,
-    authStartedAt: startedAt
+    authStartedAt: startedAt,
+    authTiming: timing
   };
+  timing.profileBuildMs = Date.now() - stageStartedAt;
+  timing.authenticationTotalMs = Date.now() - startedAt;
+  return result;
 }
 
 function authenticateStaff_(code, password) {
@@ -24247,10 +24274,15 @@ function authenticateDevelopmentTestStaff_(id, password) {
 
 function createSession_(userType, userId, role, permissionLevel) {
   const startedAt = Date.now();
+  const timing = {tokenGenerateMs: 0, tokenHashMs: 0, sessionSaveMs: 0, sessionCacheWriteMs: 0};
+  let stageStartedAt = Date.now();
   const rawToken = Utilities.getUuid() + '-' + Utilities.getUuid();
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + SESSION_HOURS * 60 * 60 * 1000);
+  timing.tokenGenerateMs = Date.now() - stageStartedAt;
+  stageStartedAt = Date.now();
   const tokenHash = hashToken_(rawToken);
+  timing.tokenHashMs = Date.now() - stageStartedAt;
   const sessionRow = {
     tokenHash,
     userType,
@@ -24261,10 +24293,15 @@ function createSession_(userType, userId, role, permissionLevel) {
     expiresAt: expiresAt.toISOString(),
     revokedAt: ''
   };
-  appendObject_('Sessions', sessionRow);
+  stageStartedAt = Date.now();
+  appendObjectsFast_('Sessions', [sessionRow]);
+  timing.sessionSaveMs = Date.now() - stageStartedAt;
+  stageStartedAt = Date.now();
   cacheSessionRow_(sessionRow);
+  timing.sessionCacheWriteMs = Date.now() - stageStartedAt;
+  timing.sessionTotalMs = Date.now() - startedAt;
   perfTrace_('session.create', startedAt, {userType});
-  return {token: rawToken, expiresAt: expiresAt.toISOString()};
+  return {token: rawToken, expiresAt: expiresAt.toISOString(), timing};
 }
 
 function sessionCacheKey_(tokenHash) {
@@ -26133,13 +26170,27 @@ function doGet() {
 }
 
 function doPost(e) {
+  const doPostStartedAt = Date.now();
   let input = {};
+  const parseStartedAt = Date.now();
   try {
     input = JSON.parse((e.postData && e.postData.contents) || '{}');
   } catch (error) {
     return jsonOutput_({success: false, code: 'INVALID_JSON', error: 'リクエスト形式が正しくありません。'});
   }
-  return jsonOutput_(api(input));
+  input._requestParseMs = Date.now() - parseStartedAt;
+  const result = api(input);
+  if (result && result._timing) {
+    result._timing.requestParseMs = input._requestParseMs;
+    result._timing.doPostBeforeResponseMs = Date.now() - doPostStartedAt;
+  }
+  if (result && result._timing) {
+    const responseStartedAt = Date.now();
+    JSON.stringify(result);
+    result._timing.responseGenerationMs = Date.now() - responseStartedAt;
+    result._timing.measuredServerMs = Date.now() - doPostStartedAt;
+  }
+  return jsonOutput_(result);
 }
 
 // HTML Service から google.script.run で呼び出す唯一の公開RPCです。
@@ -26183,13 +26234,39 @@ function toClientSafe_(value) {
 
 function routePublicApi_(action, input) {
   if (action === 'studentLogin') {
+    const loginStartedAt = Date.now();
     const auth = authenticateStudent_(input.studentId, input.password);
+    const authCompletedAt = Date.now();
     const session = createSession_('STUDENT', auth.profile.studentId, auth.role, '');
+    const sessionCompletedAt = Date.now();
     authTrace_('auth.sessionCreate', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId)});
-    upsertStudentProfile_(auth.profile);
-    authTrace_('auth.profileSync', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId)});
+    const profileSyncStartedAt = Date.now();
+    const cachedProfile = getCachedStudentProfile_(auth.profile.studentId);
+    const comparedFields = ['name','campus','grade','gradeJRaw','gradeKRaw','gradeConflict','school','enrollmentStatus'];
+    const profileChanged = !cachedProfile || comparedFields.some(key =>
+      String(cachedProfile[key] == null ? '' : cachedProfile[key]) !==
+      String(auth.profile[key] == null ? '' : auth.profile[key])
+    );
+    if (profileChanged) upsertStudentProfile_(auth.profile);
+    else cacheStudentProfile_(Object.assign({}, cachedProfile, auth.profile));
+    const profileSyncMs = Date.now() - profileSyncStartedAt;
+    authTrace_('auth.profileSync', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId), changed: profileChanged});
     authTrace_('auth.complete', auth.authStartedAt, {student: maskedStudentId_(auth.profile.studentId)});
-    return {success: true, profile: auth.profile, role: auth.role, token: session.token, expiresAt: session.expiresAt};
+    const timing = Object.assign({}, auth.authTiming || {}, session.timing || {}, {
+      authenticationPhaseMs: authCompletedAt - loginStartedAt,
+      sessionPhaseMs: sessionCompletedAt - authCompletedAt,
+      profileSyncMs,
+      profileSyncSkipped: !profileChanged,
+      loginCodeTotalMs: Date.now() - loginStartedAt
+    });
+    console.info(JSON.stringify({
+      stage: 'login.breakdown',
+      elapsedMs: timing.loginCodeTotalMs,
+      cacheHit: timing.idSearchMs === 0,
+      profileSyncSkipped: timing.profileSyncSkipped,
+      timing
+    }));
+    return {success: true, profile: auth.profile, role: auth.role, token: session.token, expiresAt: session.expiresAt, _timing: timing};
   }
   if (action === 'staffLogin') {
     const auth = authenticateStaff_(input.code, input.password);
@@ -27122,8 +27199,6 @@ function resetDevelopmentTestUnitData_(studentId, unitIds) {
     rows.forEach(rowNumber => sheet.deleteRow(rowNumber));
   });
 }
-
-
 
 
 
