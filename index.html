@@ -215,6 +215,7 @@
       const out=await rpc({action,[key]:enteredId,password:enteredPassword},{attempts:1,timeoutMs:45000,trace:true});
       if(!out.success)throw Object.assign(new Error(out.error||'入力内容が違います。'),{authentication:true});
       loginTrace_('authentication-complete',started);
+      status.dataset.authTiming=JSON.stringify({roundTripMs:Math.round(performance.now()-started),server:out._timing||null});
       updateRememberedLogin_(loginType,enteredId,enteredPassword,$('rememberLogin').checked);$('password').value='';
       state.token=out.token;state.role=out.role;state.profile=out.profile;
       if(out.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}
