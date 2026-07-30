@@ -112,15 +112,13 @@
     @keyframes saveButtonPulse{0%,100%{box-shadow:0 8px 22px rgba(24,72,145,.28)}50%{box-shadow:0 8px 30px rgba(43,111,199,.55)}}
     .globalSave.saving{animation:saveButtonPulse 1.25s ease-in-out infinite}.globalSave.saving::before{display:inline-block;animation:saveHourglassFlip 1.25s ease-in-out infinite}
     @media(max-width:600px){#globalSave.globalSave{right:10px;top:72px;bottom:auto;width:min(320px,calc(100vw - 20px));min-width:280px;max-width:320px;min-height:52px;padding:9px 18px;border-width:2px;font-size:14px;box-shadow:0 8px 22px rgba(24,72,145,.28)}}
-    <style>
-    #overallPercent small,.progressValue small,.adminPercent small,.rateGrid small{font-size:.58em;font-weight:800;white-space:nowrap;opacity:.9}
+      #overallPercent small,.progressValue small,.adminPercent small,.rateGrid small{font-size:.58em;font-weight:800;white-space:nowrap;opacity:.9}
     .subjectProgress .progressValue{display:flex;justify-content:flex-end;gap:4px;white-space:nowrap}
     .adminStatusFilters{display:inline-flex;align-items:center;gap:7px;margin-left:auto;padding:4px 7px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--muted);font-size:10px;font-weight:800}
     .adminStatusFilters label{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}.adminStatusFilters input{width:14px;height:14px;margin:0}
     .adminCompactFilters{grid-template-columns:repeat(5,minmax(120px,1fr)) auto}.adminPercent{display:inline-flex;gap:3px;align-items:baseline;white-space:nowrap}
     .individualStudentPage>.rateGrid{margin-bottom:18px}
     @media(max-width:700px){.adminCompactFilters{grid-template-columns:1fr 1fr}.adminStatusFilters{width:100%;justify-content:flex-end;margin-left:0}.adminPercent{display:grid;gap:0}.subjectProgress .progressValue{font-size:11px}.subjectProgress .progressValue small{font-size:9px}}
-  </style>
 </style>
 </head>
 <body>
