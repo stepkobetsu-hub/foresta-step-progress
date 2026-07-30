@@ -25582,7 +25582,8 @@ function ensureHomeworkForLessonProgressUnlocked_(studentId, unitId, roundNumber
       studentCompletedDate: '',
       studentNoTargetAt: '',
       studentNoTargetDate: '',
-      series: normalizeSeries_(unit.series)
+      series: normalizeSeries_(unit.series),
+      dueDate: dateFromDayNumber_(dateDayNumber_(assignmentDate) + 4)
     }));
   appendObjectsFast_('Homework', additions);
   return additions;
@@ -25624,7 +25625,7 @@ function ensureVocabularyHomeworkUnlocked_(studentId, level, direction, roundNum
     studentNoTargetAt: '',
     studentNoTargetDate: '',
     series: MATERIAL_SERIES.VOCABULARY,
-    dueDate: ''
+    dueDate: dateFromDayNumber_(dateDayNumber_(assignmentDate) + 4)
   };
   appendObjectsFast_('Homework', [addition]);
   return [addition];
@@ -25762,8 +25763,11 @@ function confirmHomework_(session, input) {
 }
 
 function homeworkDueDate_(row) {
-  // assignedDate（宿題日）は期限日ではない。明示された期限日だけを使用する。
-  return dateOnly_(row && (row.dueDate || row.deadlineDate || row.homeworkDueDate));
+  const explicit = dateOnly_(row && (row.dueDate || row.deadlineDate || row.homeworkDueDate));
+  if (explicit) return explicit;
+  const assigned = dateOnly_(row && (row.assignedDate || row.createdAt));
+  const assignedDay = dateDayNumber_(assigned);
+  return assignedDay == null ? '' : dateFromDayNumber_(assignedDay + 4);
 }
 
 function dateDayNumber_(value) {
@@ -27280,5 +27284,4 @@ function resetDevelopmentTestUnitData_(studentId, unitIds) {
     rows.forEach(rowNumber => sheet.deleteRow(rowNumber));
   });
 }
-
 
