@@ -24525,10 +24525,7 @@ function getStudentTargetUnitIds_(studentId, subject, series) {
 function targetSelectionStartsEmpty_(subject, series) {
   const normalizedSeries = normalizeSeries_(series);
   return normalizedSeries === MATERIAL_SERIES.REQUIRED_TEXTBOOK ||
-    (
-      normalizedSeries === MATERIAL_SERIES.STEP &&
-      ['理科','社会'].includes(String(subject))
-    );
+    normalizedSeries === MATERIAL_SERIES.STEP;
 }
 
 function getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, targetRows) {
@@ -26029,10 +26026,6 @@ function getAdminStudentList_(session, filters) {
   const progressByStudent = indexRowsBy_(progress, 'studentId');
   const homeworkByStudent = indexRowsBy_(homework, 'studentId');
   const targetsByStudent = indexRowsBy_(studentTargets, 'studentId');
-  const standardByGrade = new Map(['中1','中2','中3'].map(grade => [
-    grade,
-    new Set(getCachedStandardUnitIds_(grade, ''))
-  ]));
   const showActive = !filters || filters.showActive !== false;
   const showInactive = session.role === ROLE.ADMIN && !!(filters && filters.showInactive);
 
@@ -26046,12 +26039,10 @@ function getAdminStudentList_(session, filters) {
     return true;
   }).map(profile => {
     const studentId = String(profile.studentId);
-    const targetSet = new Set(standardByGrade.get(String(profile.grade)) || []);
-    (targetsByStudent.get(studentId) || []).forEach(row => {
-        const included = String(row.included).toLowerCase() !== 'false';
-        if (included) targetSet.add(String(row.unitId));
-        else targetSet.delete(String(row.unitId));
-      });
+    const targetRows = targetsByStudent.get(studentId) || [];
+    const targetSet = new Set(
+      getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows)
+    );
     const targetIds = Array.from(targetSet);
     const studentProgress = progressByStudent.get(studentId) || [];
     const doneSet = new Set(studentProgress.filter(row =>
@@ -26065,11 +26056,13 @@ function getAdminStudentList_(session, filters) {
       roundRates[roundNumber] = targetIds.length ? done / targetIds.length : null;
     });
     const rates = {};
+    const subjectCounts = {};
     ['英語','数学','国語','理科','社会'].forEach(subject => {
       const ids = targetIds.filter(unitId => unitSubjectById[unitId] === subject);
       const completed = STUDY_ROUNDS.reduce((sum, roundNumber) =>
         sum + ids.filter(id => doneSet.has(progressRoundKey_(id, roundNumber))).length, 0);
       rates[subject] = ids.length ? completed / ids.length : null;
+      subjectCounts[subject] = {completedCount: completed, targetCount: ids.length};
     });
     const studentHomework = homeworkByStudent.get(studentId) || [];
     const lastInput = studentProgress
@@ -26080,6 +26073,7 @@ function getAdminStudentList_(session, filters) {
       targetCount: targetIds.length,
       completedCount: doneSet.size,
       subjectRates: rates,
+      subjectCounts,
       roundRates,
       unconfirmedHomeworkCount: studentHomework.filter(row =>
         ['DECLARED_DONE','NO_TARGET_CLAIM'].includes(row.studentStatus) &&
