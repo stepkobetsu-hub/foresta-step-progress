@@ -24666,18 +24666,6 @@ function getStudentDashboard_(session, requestedStudentId) {
     .map(row => String(row.unitId)));
   const dashboard = {
     profile,
-    materialTargetCounts: [MATERIAL_SERIES.STEP, MATERIAL_SERIES.GOAL, MATERIAL_SERIES.REQUIRED_TEXTBOOK]
-      .concat([MATERIAL_SERIES.VOCABULARY])
-      .reduce((counts, series) => {
-        counts[series] = series === MATERIAL_SERIES.VOCABULARY
-          ? studentTargets.filter(row =>
-              String(row.subject) === '英語' &&
-              normalizeSeries_(row.series) === MATERIAL_SERIES.VOCABULARY &&
-              String(row.included).toLowerCase() !== 'false'
-            ).length
-          : units.filter(unit => normalizeSeries_(unit.series) === series).length;
-        return counts;
-      }, {}),
     overall: {
       targetCount: targets.length,
       completedCount,
