@@ -327,6 +327,7 @@
       state.studentLandingPending=false;
     }
     if(!['homework','progress','targets'].includes(state.studentPage))state.studentPage='homework';
+    if(state.studentPage==='targets'&&state.subject==='英語'&&!state.vocabularyCache)try{state.vocabularyCache=(await call('listVocabularyProgress')).data}catch(error){}
     const d=state.dashboardCache;
     const subjects=d.subjects.map(s=>`<button class="${subjectClass_(s.subject)} ${state.subject===s.subject?'active':''}" data-subject="${esc(s.subject)}"><span>${esc(s.subject)}</span><b>${state.studentPage==='targets'?s.targetCount:pct(s.progressRate)}</b></button>`).join('');
     $('main').innerHTML=`${studentWelcomeHtml_(d)}${studentProgressHero_(d)}<div class="viewTabs"><button data-page="homework" class="${state.studentPage==='homework'?'active':''}">📚 次回の宿題</button><button data-page="progress" class="${state.studentPage==='progress'?'active':''}">✏️ 進捗入力</button><button data-page="targets" class="${state.studentPage==='targets'?'active':''}">🎯 目標範囲</button></div><div id="studentBody"></div>`;
