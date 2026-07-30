@@ -26022,10 +26022,15 @@ function getAdminStudentList_(session, filters) {
     progress
   );
   const studentTargets = getRowsAsObjects_('StudentTargets');
-  const unitSubjectById = getCachedUnitSubjectMap_();
+  const units = getRowsAsObjects_('Units');
+  const unitById = new Map(units.map(unit => [String(unit.unitId), unit]));
   const progressByStudent = indexRowsBy_(progress, 'studentId');
   const homeworkByStudent = indexRowsBy_(homework, 'studentId');
   const targetsByStudent = indexRowsBy_(studentTargets, 'studentId');
+  const standardByGrade = new Map(['中1','中2','中3'].map(grade => [
+    grade,
+    getCachedStandardUnitIds_(grade, '')
+  ]));
   const showActive = !filters || filters.showActive !== false;
   const showInactive = session.role === ROLE.ADMIN && !!(filters && filters.showInactive);
 
@@ -26040,9 +26045,24 @@ function getAdminStudentList_(session, filters) {
   }).map(profile => {
     const studentId = String(profile.studentId);
     const targetRows = targetsByStudent.get(studentId) || [];
-    const targetSet = new Set(
-      getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows)
-    );
+    const configuredBuckets = new Set(targetRows.map(row =>
+      String(row.subject) + '\t' + normalizeSeries_(row.series)
+    ));
+    const targetSet = new Set(standardByGrade.get(String(profile.grade)) || []);
+    targetSet.forEach(unitId => {
+      const unit = unitById.get(String(unitId));
+      if (!unit) return;
+      const bucket = String(unit.subject) + '\t' + normalizeSeries_(unit.series);
+      if (targetSelectionStartsEmpty_(unit.subject, unit.series) && !configuredBuckets.has(bucket)) {
+        targetSet.delete(String(unitId));
+      }
+    });
+    targetRows.forEach(row => {
+      const unitId = String(row.unitId);
+      const included = String(row.included).toLowerCase() !== 'false';
+      if (included) targetSet.add(unitId);
+      else targetSet.delete(unitId);
+    });
     const targetIds = Array.from(targetSet);
     const studentProgress = progressByStudent.get(studentId) || [];
     const doneSet = new Set(studentProgress.filter(row =>
@@ -26058,7 +26078,7 @@ function getAdminStudentList_(session, filters) {
     const rates = {};
     const subjectCounts = {};
     ['英語','数学','国語','理科','社会'].forEach(subject => {
-      const ids = targetIds.filter(unitId => unitSubjectById[unitId] === subject);
+      const ids = targetIds.filter(unitId => String(unitById.get(unitId)?.subject || '') === subject);
       const completed = STUDY_ROUNDS.reduce((sum, roundNumber) =>
         sum + ids.filter(id => doneSet.has(progressRoundKey_(id, roundNumber))).length, 0);
       rates[subject] = ids.length ? completed / ids.length : null;
@@ -26091,7 +26111,6 @@ function getAdminStudentList_(session, filters) {
     return true;
   });
 }
-
 function indexRowsBy_(rows, field) {
   const index = new Map();
   rows.forEach(row => {
