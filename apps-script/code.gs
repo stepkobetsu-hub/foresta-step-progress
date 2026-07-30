@@ -26015,6 +26015,22 @@ function syncStudentProfiles_(session) {
 
 function getAdminStudentList_(session, filters) {
   requireRole_(session, [ROLE.TEACHER, ROLE.ADMIN]);
+  const cache = CacheService.getScriptCache();
+  const cacheFilter = {
+    campus: String(filters && filters.campus || ''),
+    grade: String(filters && filters.grade || ''),
+    name: String(filters && filters.name || ''),
+    showActive: !filters || filters.showActive !== false,
+    showInactive: session.role === ROLE.ADMIN && !!(filters && filters.showInactive),
+    homeworkStatus: String(filters && filters.homeworkStatus || ''),
+    progressStatus: String(filters && filters.progressStatus || '')
+  };
+  const cacheDigest = Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(cacheFilter))
+  ).replace(/=+$/, '');
+  const cacheKey = ['FS','ADMIN_LIST',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,session.role,cacheDigest].join(':');
+  const cached = cacheGetLargeJson_(cache, cacheKey);
+  if (cached) return cached;
   const profiles = getRowsAsObjects_('StudentProfiles');
   const progress = getRowsAsObjects_('UnitProgress');
   const homework = filterHomeworkByLessonProgress_(
@@ -26034,7 +26050,7 @@ function getAdminStudentList_(session, filters) {
   const showActive = !filters || filters.showActive !== false;
   const showInactive = session.role === ROLE.ADMIN && !!(filters && filters.showInactive);
 
-  return profiles.filter(profile => {
+  const result = profiles.filter(profile => {
     const active = profile.enrollmentStatus === 'ACTIVE';
     if (active && !showActive) return false;
     if (!active && !showInactive) return false;
@@ -26110,6 +26126,8 @@ function getAdminStudentList_(session, filters) {
     if (filters && filters.progressStatus === 'COMPLETED' && row.overallRate < 1) return false;
     return true;
   });
+  cachePutLargeJson_(cache, cacheKey, result, 30);
+  return result;
 }
 function indexRowsBy_(rows, field) {
   const index = new Map();
@@ -27262,6 +27280,5 @@ function resetDevelopmentTestUnitData_(studentId, unitIds) {
     rows.forEach(rowNumber => sheet.deleteRow(rowNumber));
   });
 }
-
 
 
