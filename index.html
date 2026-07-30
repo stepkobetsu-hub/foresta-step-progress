@@ -122,11 +122,12 @@
     @media(max-width:700px){.adminCompactFilters{grid-template-columns:1fr 1fr}.adminStatusFilters{width:100%;justify-content:flex-end;margin-left:0}.adminPercent{display:grid;gap:0}.subjectProgress .progressValue{font-size:11px}.subjectProgress .progressValue small{font-size:9px}}
     .adminDetailLabel{display:inline-flex;align-items:center;padding:0 8px;color:var(--muted);font-size:10px;font-weight:800;white-space:nowrap}
     .adminBackButton{border-color:#e38a34!important;background:#fff3e5!important;color:#9a4c0a!important;box-shadow:0 4px 12px rgba(184,92,15,.14)}
-    .adminEditToggle{border-color:#d5a119!important;background:#fff8d8!important;color:#785600!important;box-shadow:0 4px 12px rgba(160,118,0,.14)}
+    .adminEditToggle{min-height:58px;padding:0 28px;border-color:#d5a119!important;background:#fff8d8!important;color:#785600!important;box-shadow:0 4px 12px rgba(160,118,0,.14);font-size:17px;font-weight:900}
     .adminEditToggle.active{border-color:#b43e4b!important;background:#b43e4b!important;color:#fff!important}
     .adminSubjectRow{display:flex;align-items:center;gap:10px;margin:10px 0}.adminSubjectRow .subjectTabs{flex:1;min-width:0;margin:0}.adminSubjectRow .adminEditToggle{flex:0 0 auto;white-space:nowrap}
+    .adminEditGuide{flex:0 1 230px;color:#c72f3d;font-size:11px;font-weight:900;line-height:1.45;text-align:right}
     .adminReadOnlyNotice{margin:0 0 8px;padding:7px 10px;border-radius:9px;background:#f3f6fa;color:#637188;font-size:10px;font-weight:800}
-    @media(max-width:700px){.adminSubjectRow{align-items:stretch}.adminSubjectRow .adminEditToggle{padding-inline:10px}}
+    @media(max-width:700px){.adminSubjectRow{align-items:stretch;gap:6px}.adminSubjectRow .adminEditToggle{min-height:52px;padding-inline:16px;font-size:14px}.adminEditGuide{flex-basis:130px;align-self:center;font-size:9px}}
 </style>
 </head>
 <body>
@@ -606,7 +607,7 @@
     const units=d.units.filter(unit=>unit.subject===state.subject&&unit.series===state.series);
     const info=seriesInfo_(state.series),hasLct=units.some(progressHasLct_),required=state.series==='REQUIRED_TEXTBOOK';
     if(!['homework','progress','targets'].includes(state.studentPage))state.studentPage='progress';
-    $('adminBody').innerHTML=`${studentWelcomeHtml_(d)}${studentProgressHero_(d)}<div class="viewTabs"><button data-admin-student-page="homework" class="${state.studentPage==='homework'?'active':''}">📚 次回の宿題</button><button data-admin-student-page="progress" class="${state.studentPage==='progress'?'active':''}">✏️ 進捗入力</button><button data-admin-student-page="targets" class="${state.studentPage==='targets'?'active':''}">🎯 目標範囲</button></div><div class="adminSubjectRow"><div class="subjectTabs">${subjects}</div><button id="adminEditToggle" class="adminEditToggle ${state.adminEditing?'active':''}">${state.adminEditing?'編集を終了':'管理者編集'}</button></div>${state.adminEditing?'':'<p class="adminReadOnlyNotice">閲覧専用です。変更する場合は、教科行の右にある「管理者編集」を押してください。</p>'}<div id="studentBody"></div>`;
+    $('adminBody').innerHTML=`${studentWelcomeHtml_(d)}${studentProgressHero_(d)}<div class="viewTabs"><button data-admin-student-page="homework" class="${state.studentPage==='homework'?'active':''}">📚 次回の宿題</button><button data-admin-student-page="progress" class="${state.studentPage==='progress'?'active':''}">✏️ 進捗入力</button><button data-admin-student-page="targets" class="${state.studentPage==='targets'?'active':''}">🎯 目標範囲</button></div><div class="adminSubjectRow"><div class="subjectTabs">${subjects}</div>${state.adminEditing?'':'<span class="adminEditGuide">閲覧専用です。変更する場合は、教科行の右にある「管理者編集」を押してください。</span>'}<button id="adminEditToggle" class="adminEditToggle ${state.adminEditing?'active':''}">${state.adminEditing?'編集を終了':'管理者編集'}</button></div><div id="studentBody"></div>`;
     document.querySelectorAll('[data-admin-student-page]').forEach(button=>button.onclick=()=>{state.studentPage=button.dataset.adminStudentPage;renderAdminStudentDashboard_(d,studentId)});
     $('adminEditToggle').onclick=()=>{state.adminEditing=!state.adminEditing;renderAdminStudentDashboard_(d,studentId)};
     document.querySelectorAll('[data-admin-student-subject]').forEach(button=>button.onclick=()=>{state.subject=button.dataset.adminStudentSubject;if(!d.selectableUnits.some(unit=>unit.subject===state.subject&&unit.series===state.series))state.series='FORESTA_STEP';renderAdminStudentDashboard_(d,studentId)});
