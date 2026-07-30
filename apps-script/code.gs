@@ -24522,16 +24522,51 @@ function getStudentTargetUnitIds_(studentId, subject, series) {
   );
 }
 
-function getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, targetRows) {
-  const overrides = targetRows
-    .filter(row =>
-      String(row.studentId) === String(studentId) &&
-      (!subject || row.subject === subject) &&
-      (!series || normalizeSeries_(row.series) === normalizeSeries_(series))
+function targetSelectionStartsEmpty_(subject, series) {
+  const normalizedSeries = normalizeSeries_(series);
+  return normalizedSeries === MATERIAL_SERIES.REQUIRED_TEXTBOOK ||
+    (
+      normalizedSeries === MATERIAL_SERIES.STEP &&
+      ['理科','社会'].includes(String(subject))
     );
-  const overrideMap = new Map(overrides.map(row => [String(row.unitId), String(row.included).toLowerCase() !== 'false']));
-  const target = new Set(getCachedStandardUnitIds_(profile.grade, subject, series));
-  overrideMap.forEach((included, unitId) => included ? target.add(unitId) : target.delete(unitId));
+}
+
+function getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, targetRows) {
+  const studentRows = (targetRows || []).filter(row =>
+    String(row.studentId) === String(studentId)
+  );
+  const overrides = studentRows.filter(row =>
+    (!subject || row.subject === subject) &&
+    (!series || normalizeSeries_(row.series) === normalizeSeries_(series))
+  );
+  const overrideMap = new Map(overrides.map(row => [
+    String(row.unitId),
+    String(row.included).toLowerCase() !== 'false'
+  ]));
+  const standardUnitIds = getCachedStandardUnitIds_(profile.grade, subject, series);
+  const target = new Set(standardUnitIds);
+  const explicitlyConfigured = new Set(studentRows.map(row =>
+    String(row.subject) + '\t' + normalizeSeries_(row.series)
+  ));
+  const selectableById = new Map(
+    filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade))
+      .map(unit => [String(unit.unitId), unit])
+  );
+
+  standardUnitIds.forEach(unitId => {
+    const unit = selectableById.get(String(unitId));
+    if (!unit) return;
+    const bucket = String(unit.subject) + '\t' + normalizeSeries_(unit.series);
+    if (
+      targetSelectionStartsEmpty_(unit.subject, unit.series) &&
+      !explicitlyConfigured.has(bucket)
+    ) {
+      target.delete(String(unitId));
+    }
+  });
+  overrideMap.forEach((included, unitId) =>
+    included ? target.add(unitId) : target.delete(unitId)
+  );
   return Array.from(target);
 }
 
