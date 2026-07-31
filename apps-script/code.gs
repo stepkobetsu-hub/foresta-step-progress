@@ -404,6 +404,9 @@ function getRowsByFieldValue_(sheetName, fieldName, fieldValue) {
 }
 
 function getFirstRowByFieldValue_(sheetName, fieldName, fieldValue) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    return supabaseReadRows_(sheetName, fieldName, fieldValue)[0] || null;
+  }
   const startedAt = Date.now();
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName] || [];
@@ -24184,6 +24187,10 @@ function authenticateStudent_(studentId, password) {
     testAuth.authStartedAt = startedAt;
     return testAuth;
   }
+  if (typeof authenticateStudentWithSupabase_ === 'function') {
+    const supabaseAuth = authenticateStudentWithSupabase_(id, pass);
+    if (supabaseAuth) return supabaseAuth;
+  }
 
   const lookup = getStudentAuthRecord_(id);
   Object.assign(timing, lookup.timing || {});
@@ -24410,6 +24417,11 @@ function safeStringEquals_(expected, actual) {
 }
 
 function upsertStudentProfile_(profile) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentProfiles')) {
+    supabaseWriteRows_('StudentProfiles', [profile]);
+    cacheStudentProfile_(profile);
+    return;
+  }
   const sheet = getSheet_('StudentProfiles');
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   const studentIdColumn = headers.indexOf('studentId') + 1;
