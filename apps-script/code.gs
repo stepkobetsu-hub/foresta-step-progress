@@ -339,6 +339,9 @@ function getSheet_(name) {
 }
 
 function getRowsAsObjects_(sheetName) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    return supabaseReadRows_(sheetName);
+  }
   const sheet = getSheet_(sheetName);
   const values = sheet.getDataRange().getValues();
   if (!values.length) return [];
@@ -361,6 +364,11 @@ function rowsFromValues_(headers, values, firstRowNumber) {
 function getRowsByFieldValue_(sheetName, fieldName, fieldValue) {
   const cacheKey = sheetName + '|' + fieldName + '|' + String(fieldValue);
   if (requestFilteredRowsCache_ && requestFilteredRowsCache_.has(cacheKey)) return requestFilteredRowsCache_.get(cacheKey);
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    const result = supabaseReadRows_(sheetName, fieldName, fieldValue);
+    if (requestFilteredRowsCache_) requestFilteredRowsCache_.set(cacheKey, result);
+    return result;
+  }
   const startedAt = Date.now();
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName] || [];
@@ -421,12 +429,20 @@ function getFirstRowByFieldValue_(sheetName, fieldName, fieldValue) {
 }
 
 function appendObject_(sheetName, object) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    supabaseWriteRows_(sheetName, [object]);
+    return;
+  }
   const sheet = getSheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   sheet.appendRow(headers.map(header => object[header] == null ? '' : object[header]));
 }
 
 function updateObjectRow_(sheetName, rowNumber, object) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    supabaseWriteRows_(sheetName, [object]);
+    return;
+  }
   const sheet = getSheet_(sheetName);
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const current = sheet.getRange(rowNumber, 1, 1, headers.length).getValues()[0];
@@ -453,6 +469,10 @@ function syncFilteredRowsCache_(sheetName, rows) {
 
 function appendObjectsFast_(sheetName, objects) {
   if (!objects || !objects.length) return;
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    supabaseWriteRows_(sheetName, objects);
+    return;
+  }
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName];
   const values = objects.map(object =>
@@ -464,6 +484,10 @@ function appendObjectsFast_(sheetName, objects) {
 }
 
 function updateObjectRowFast_(sheetName, current, changes) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    supabaseWriteRows_(sheetName, [Object.assign({}, current || {}, changes || {})]);
+    return;
+  }
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName];
   const next = Object.assign({}, current || {}, changes || {});
@@ -473,6 +497,10 @@ function updateObjectRowFast_(sheetName, current, changes) {
 }
 
 function replaceAllObjectRowsFast_(sheetName, rows, previousCount) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    supabaseWriteRows_(sheetName, rows);
+    return;
+  }
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName];
   const writeCount = Math.max(Number(previousCount || 0), rows.length);
@@ -25503,6 +25531,10 @@ function progressStateForClient_(state, roundNumber) {
 }
 
 function replaceStudentTargetSubjectRows_(studentId, subject, series, currentRows, replacementRows) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentTargets')) {
+    supabaseWriteRows_('StudentTargets', replacementRows);
+    return;
+  }
   const sheet = getSheet_('StudentTargets');
   const headers = DB_SCHEMAS.StudentTargets;
   const untouched = currentRows.filter(row =>
