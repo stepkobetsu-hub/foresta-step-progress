@@ -25113,7 +25113,11 @@ function saveVocabularyTargets_(session, input) {
     replacements.forEach((row, unitId) => {
       if (!currentByUnit.has(unitId)) finalRows.push(row);
     });
-    replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentTargets')) {
+      supabaseWriteRows_('StudentTargets', Array.from(replacements.values()));
+    } else {
+      replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    }
     const targetCount = finalRows.filter(row =>
       String(row.studentId) === studentId &&
       String(row.subject) === '英語' &&
@@ -25191,7 +25195,11 @@ function setOwnTargetChanges_(session, input) {
     replacements.forEach((row, unitId) => {
       if (!rowByUnit.has(unitId)) finalRows.push(row);
     });
-    replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentTargets')) {
+      supabaseWriteRows_('StudentTargets', Array.from(replacements.values()));
+    } else {
+      replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    }
     const targetCount = getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, finalRows).length;
     appendAuditFast_(
       session,
