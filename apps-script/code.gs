@@ -24593,6 +24593,34 @@ function putCachedStudentTargetIds_(studentId, grade, unitIds) {
   );
 }
 
+function studentSelectableUnitsCacheKey_(studentId, grade) {
+  return ['FS','STUDENT_UNITS',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,String(studentId),String(grade||'')].join(':');
+}
+
+function getCachedStudentSelectableUnits_(studentId, grade) {
+  try {
+    return cacheGetLargeJson_(
+      CacheService.getScriptCache(),
+      studentSelectableUnitsCacheKey_(studentId, grade)
+    );
+  } catch (error) {
+    return null;
+  }
+}
+
+function putCachedStudentSelectableUnits_(studentId, grade, units) {
+  try {
+    cachePutLargeJson_(
+      CacheService.getScriptCache(),
+      studentSelectableUnitsCacheKey_(studentId, grade),
+      units || [],
+      600
+    );
+  } catch (ignored) {
+    // Cache failure must not prevent dashboard display or saving.
+  }
+}
+
 function targetSelectionStartsEmpty_(subject, series) {
   const normalizedSeries = normalizeSeries_(series);
   return normalizedSeries === MATERIAL_SERIES.REQUIRED_TEXTBOOK ||
@@ -24660,6 +24688,7 @@ function getStudentDashboard_(session, requestedStudentId) {
     .filter(row => rowSchoolYear_(row) === SCHOOL_YEAR);
   const progress = studentProgress.filter(row => targetSet.has(String(row.unitId)));
   const selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+  putCachedStudentSelectableUnits_(studentId, profile.grade, selectableUnits);
   const units = selectableUnits.filter(row => targetSet.has(String(row.unitId)));
   const selectableById = new Map(selectableUnits.map(unit => [String(unit.unitId), unit]));
   const progressMap = new Map(progress.map(row => [
@@ -24866,7 +24895,11 @@ function saveStudentProgress_(session, input) {
   const profile = getCachedStudentProfile_(studentId);
   markTiming('profile');
   if (!profile) throw new Error('生徒情報が見つかりません。');
-  const selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+  let selectableUnits = getCachedStudentSelectableUnits_(studentId, profile.grade);
+  if (!selectableUnits) {
+    selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+    putCachedStudentSelectableUnits_(studentId, profile.grade, selectableUnits);
+  }
   markTiming('units');
   const selectableIds = new Set(selectableUnits.map(unit => String(unit.unitId)));
   if (!selectableIds.has(unitId)) throw publicError_('選択できない単元です。', 'INVALID_PROGRESS_UNIT');
