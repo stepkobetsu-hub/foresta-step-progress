@@ -24921,7 +24921,9 @@ function saveStudentProgress_(session, input) {
     const completedKeys = new Set(updatedRows.filter(row =>
       targetSet.has(String(row.unitId)) && isTrue_(row.tryCompleted)
     ).map(row => progressRoundKey_(row.unitId, rowRoundNumber_(row))));
-    const unitSubjectById = getCachedUnitSubjectMap_();
+    const unitSubjectById = Object.fromEntries(
+      selectableUnits.map(unit => [String(unit.unitId), String(unit.subject || '')])
+    );
     const subjectAggregates = ['英語','数学','国語','理科','社会'].map(subject => {
       const ids = targetIds.filter(id => unitSubjectById[id] === subject);
       const rounds = STUDY_ROUNDS.map(value => {
