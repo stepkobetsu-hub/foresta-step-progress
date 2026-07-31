@@ -515,6 +515,19 @@ function replaceAllObjectRowsFast_(sheetName, rows, previousCount) {
   sheet.getRange(2, 1, writeCount, headers.length).setValues(values);
 }
 
+function acquireStorageWriteLock_(sheetName) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    return null;
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  return lock;
+}
+
+function releaseStorageWriteLock_(lock) {
+  if (lock) lock.releaseLock();
+}
+
 function appendAuditFast_(session, action, entityType, entityId, beforeValue, afterValue) {
   appendObjectsFast_('AuditLog', [{
     auditId: Utilities.getUuid(),
@@ -25075,8 +25088,7 @@ function saveVocabularyTargets_(session, input) {
     });
   });
   if (!changes.size) throw publicError_('変更する範囲を選択してください。', 'TARGET_CHANGES_REQUIRED');
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('StudentTargets');
   try {
     const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const now = nowIso_();
@@ -25130,7 +25142,7 @@ function saveVocabularyTargets_(session, input) {
     });
     return {success: true, changedCount: changes.size, targetCount};
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
 }
 
@@ -25155,8 +25167,7 @@ function setOwnTargetChanges_(session, input) {
     throw publicError_('選択できない単元が含まれています。', 'INVALID_TARGET_UNIT');
   }
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('StudentTargets');
   try {
     const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const now = nowIso_();
@@ -25218,7 +25229,7 @@ function setOwnTargetChanges_(session, input) {
       clientRevision: Number(input.clientRevision || 0)
     };
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
 }
 
@@ -25389,8 +25400,7 @@ function setOwnTargetSelection_(session, input) {
   }
   const previousTargetCount = getStudentTargetUnitIds_(studentId, subject, series).length;
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('StudentTargets');
   try {
     const currentRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const currentByUnit = new Map(currentRows
@@ -25434,7 +25444,7 @@ function setOwnTargetSelection_(session, input) {
       }
     );
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
   return {success: true, subject, targetCount: selectedIds.size};
 }
