@@ -269,6 +269,40 @@ function supabaseReadRows_(sheetName, fieldName, fieldValue) {
   return rows.map((row, index) => mapper(row, index + 2));
 }
 
+function supabaseReadStudentBundle_(studentId) {
+  const config = supabaseConfig_();
+  const definitions = [
+    {key: 'StudentTargets', table: SUPABASE_TABLES_.StudentTargets, mapper: targetRowFromSupabase_},
+    {key: 'UnitProgress', table: SUPABASE_TABLES_.UnitProgress, mapper: progressRowFromSupabase_},
+    {key: 'Homework', table: SUPABASE_TABLES_.Homework, mapper: homeworkRowFromSupabase_}
+  ];
+  const headers = {
+    apikey: config.serviceRoleKey,
+    Authorization: 'Bearer ' + config.serviceRoleKey,
+    Range: '0-999'
+  };
+  const responses = UrlFetchApp.fetchAll(definitions.map(definition => ({
+    url: config.url + '/rest/v1/' + definition.table +
+      '?select=*&student_id=eq.' + encodeURIComponent(String(studentId)),
+    method: 'get',
+    muteHttpExceptions: true,
+    headers
+  })));
+  const result = {};
+  responses.forEach((response, index) => {
+    const definition = definitions[index];
+    const status = response.getResponseCode();
+    if (status < 200 || status >= 300) {
+      throw new Error('Supabase API error (' + status + '): ' + response.getContentText().slice(0, 500));
+    }
+    const page = JSON.parse(response.getContentText() || '[]');
+    result[definition.key] = page.length >= 1000
+      ? supabaseReadRows_(definition.key, 'studentId', studentId)
+      : page.map((row, rowIndex) => definition.mapper(row, rowIndex + 2));
+  });
+  return result;
+}
+
 function supabaseWriteRows_(sheetName, rows) {
   const validRows = (rows || []).filter(row => {
     if (!row) return false;
