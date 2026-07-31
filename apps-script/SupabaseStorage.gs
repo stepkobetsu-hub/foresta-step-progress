@@ -388,6 +388,10 @@ function authenticateStudentWithSupabase_(studentId, password) {
 }
 
 function migrateLoginStorageToSupabase() {
+  const config = supabaseConfig_();
+  if (config.enabled) {
+    throw new Error('本番切替後は再移行できません。SUPABASE_ENABLED=true のまま使用してください。');
+  }
   const profiles = sheetRowsForSupabaseMigration_('StudentProfiles')
     .filter(row => row.studentId)
     .map(profileRowForSupabase_);
