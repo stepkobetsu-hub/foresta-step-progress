@@ -112,6 +112,18 @@ function supabaseUpsertBatches_(table, rows, conflictColumns) {
   }
 }
 
+function dedupeSupabaseRows_(rows, keyFields) {
+  const byKey = new Map();
+  (rows || []).forEach(row => {
+    const key = keyFields.map(field => String(row[field] == null ? '' : row[field])).join('\u001f');
+    const current = byKey.get(key);
+    if (!current || String(row.updated_at || '') >= String(current.updated_at || '')) {
+      byKey.set(key, row);
+    }
+  });
+  return Array.from(byKey.values());
+}
+
 function supabaseTableCount_(table) {
   const response = supabaseRequest_(
     table + '?select=*&limit=1',
@@ -134,12 +146,18 @@ function migrateProgressStorageToSupabase() {
     throw new Error('移行中はSUPABASE_ENABLEDをfalseにしてください。');
   }
 
-  const progressRows = getRowsAsObjects_('UnitProgress')
-    .filter(row => row.studentId && row.unitId)
-    .map(progressRowForSupabase_);
-  const targetRows = getRowsAsObjects_('StudentTargets')
-    .filter(row => row.studentId && row.unitId)
-    .map(targetRowForSupabase_);
+  const progressRows = dedupeSupabaseRows_(
+    getRowsAsObjects_('UnitProgress')
+      .filter(row => row.studentId && row.unitId)
+      .map(progressRowForSupabase_),
+    ['student_id','unit_id','school_year','round_number']
+  );
+  const targetRows = dedupeSupabaseRows_(
+    getRowsAsObjects_('StudentTargets')
+      .filter(row => row.studentId && row.unitId)
+      .map(targetRowForSupabase_),
+    ['student_id','unit_id']
+  );
 
   supabaseUpsertBatches_(
     SUPABASE_TABLES_.UnitProgress,
