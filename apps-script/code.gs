@@ -24833,26 +24833,38 @@ function saveStudentProgressBatch_(session, input) {
 }
 
 function saveStudentProgress_(session, input) {
+  const timing = {};
+  let timingStartedAt = Date.now();
+  const markTiming = name => {
+    const now = Date.now();
+    timing[name] = now - timingStartedAt;
+    timingStartedAt = now;
+  };
   requireRole_(session, [ROLE.STUDENT, ROLE.ADMIN]);
   const studentId = resolveStudentId_(session, input.studentId, [ROLE.ADMIN]);
   const unitId = String(input.unitId || '');
   const roundNumber = normalizeRoundNumber_(input.roundNumber);
   const profile = getCachedStudentProfile_(studentId);
+  markTiming('profile');
   if (!profile) throw new Error('生徒情報が見つかりません。');
   const selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+  markTiming('units');
   const selectableIds = new Set(selectableUnits.map(unit => String(unit.unitId)));
   if (!selectableIds.has(unitId)) throw publicError_('選択できない単元です。', 'INVALID_PROGRESS_UNIT');
   const selectedUnit = selectableUnits.find(unit => String(unit.unitId) === unitId);
   const targetRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
   const targetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows);
+  markTiming('targets');
   const lctResult = unitHasLct_(selectedUnit) ? String(input.lctResult || '') : '';
   if (!['', 'PERFECT', 'PASS', 'REVIEW'].includes(lctResult)) {
     throw publicError_('LCTは◎・○・×から選択してください。', 'INVALID_LCT_RESULT');
   }
 
   const lock = acquireStorageWriteLock_('UnitProgress');
+  markTiming('lock');
   try {
     const rows = getRowsByFieldValue_('UnitProgress', 'studentId', studentId);
+    markTiming('progressRead');
     const current = rows.find(row =>
       String(row.studentId) === studentId &&
       String(row.unitId) === unitId &&
@@ -24904,10 +24916,13 @@ function saveStudentProgress_(session, input) {
     };
     if (current) updateObjectRowFast_('UnitProgress', current, next);
     else appendObjectsFast_('UnitProgress', [next]);
+    markTiming('progressWrite');
     const createdHomework = hasLessonProgress_(next)
       ? ensureHomeworkForLessonProgress_(studentId, unitId, roundNumber, SCHOOL_YEAR, today, true)
       : [];
+    markTiming('homework');
     appendAuditFast_(session, current ? 'UPDATE_PROGRESS' : 'CREATE_PROGRESS', 'UnitProgress', next.progressId, before, next);
+    markTiming('audit');
 
     const updatedRows = rows.filter(row =>
       String(row.studentId) === studentId && rowSchoolYear_(row) === SCHOOL_YEAR
@@ -24938,12 +24953,14 @@ function saveStudentProgress_(session, input) {
       return {roundNumber: value, targetCount: targetIds.length, completedCount: done, progressRate: targetIds.length ? done / targetIds.length : null};
     });
     const completedCount = rounds.reduce((sum, item) => sum + item.completedCount, 0);
+    markTiming('aggregates');
     return {
       success: true,
       clientRevision: next.clientRevision,
       clientMutationId: next.clientMutationId,
       progress: next,
       createdHomework,
+      timing,
       aggregates: {
         overall: {
           targetCount: targetIds.length,
