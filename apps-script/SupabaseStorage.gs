@@ -426,6 +426,34 @@ function migrateLoginStorageToSupabase() {
   return result;
 }
 
+function testSupabaseStudentTargetDeltaWrite() {
+  const rows = supabaseReadRows_('StudentTargets', 'studentId', 'TEST-STUDENT-01');
+  if (!rows.length) throw new Error('テスト生徒の目標範囲データが見つかりません。');
+  const original = rows[0];
+  const changed = Object.assign({}, original, {
+    included: !isTrue_(original.included),
+    updatedAt: new Date().toISOString(),
+    updatedBy: 'SUPABASE_DELTA_TEST'
+  });
+  const startedAt = Date.now();
+  try {
+    supabaseWriteRows_('StudentTargets', [changed]);
+    const saved = supabaseReadRows_('StudentTargets', 'studentId', 'TEST-STUDENT-01')
+      .find(row => String(row.unitId) === String(original.unitId));
+    if (!saved || isTrue_(saved.included) !== isTrue_(changed.included)) {
+      throw new Error('Supabase差分保存の確認に失敗しました。');
+    }
+  } finally {
+    supabaseWriteRows_('StudentTargets', [Object.assign({}, original, {
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'SUPABASE_DELTA_TEST_RESTORE'
+    })]);
+  }
+  const result = {success: true, changedRows: 1, restored: true, elapsedMs: Date.now() - startedAt};
+  console.info(JSON.stringify({action: 'testSupabaseStudentTargetDeltaWrite', result}));
+  return result;
+}
+
 function supabaseUpsertBatches_(table, rows, conflictColumns) {
   const batchSize = 200;
   for (let index = 0; index < rows.length; index += batchSize) {
