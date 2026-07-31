@@ -24575,6 +24575,24 @@ function getStudentTargetUnitIds_(studentId, subject, series) {
   );
 }
 
+function studentTargetIdsCacheKey_(studentId, grade) {
+  return ['FS','TARGET_IDS',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,String(studentId),String(grade||'')].join(':');
+}
+
+function getCachedStudentTargetIds_(studentId, grade) {
+  const value = CacheService.getScriptCache().get(studentTargetIdsCacheKey_(studentId, grade));
+  if (!value) return null;
+  try { return JSON.parse(value); } catch (error) { return null; }
+}
+
+function putCachedStudentTargetIds_(studentId, grade, unitIds) {
+  CacheService.getScriptCache().put(
+    studentTargetIdsCacheKey_(studentId, grade),
+    JSON.stringify(unitIds || []),
+    600
+  );
+}
+
 function targetSelectionStartsEmpty_(subject, series) {
   const normalizedSeries = normalizeSeries_(series);
   return normalizedSeries === MATERIAL_SERIES.REQUIRED_TEXTBOOK ||
@@ -24634,6 +24652,7 @@ function getStudentDashboard_(session, requestedStudentId) {
     ? studentBundle.StudentTargets
     : getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
   const targets = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', studentTargets);
+  putCachedStudentTargetIds_(studentId, profile.grade, targets);
   const targetSet = new Set(targets);
   const studentProgress = (studentBundle
     ? studentBundle.UnitProgress
@@ -24852,8 +24871,12 @@ function saveStudentProgress_(session, input) {
   const selectableIds = new Set(selectableUnits.map(unit => String(unit.unitId)));
   if (!selectableIds.has(unitId)) throw publicError_('選択できない単元です。', 'INVALID_PROGRESS_UNIT');
   const selectedUnit = selectableUnits.find(unit => String(unit.unitId) === unitId);
-  const targetRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
-  const targetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows);
+  let targetIds = getCachedStudentTargetIds_(studentId, profile.grade);
+  if (targetIds == null) {
+    const targetRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
+    targetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows);
+    putCachedStudentTargetIds_(studentId, profile.grade, targetIds);
+  }
   markTiming('targets');
   const lctResult = unitHasLct_(selectedUnit) ? String(input.lctResult || '') : '';
   if (!['', 'PERFECT', 'PASS', 'REVIEW'].includes(lctResult)) {
@@ -25245,6 +25268,11 @@ function setOwnTargetChanges_(session, input) {
     }
     perfTrace_('targetSave.storageWrite', startedAt, {changedRows: replacements.size});
     const targetCount = getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, finalRows).length;
+    putCachedStudentTargetIds_(
+      studentId,
+      profile.grade,
+      getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', finalRows)
+    );
     perfTrace_('targetSave.targetCount', startedAt, {targetCount});
     appendAuditFast_(
       session,
