@@ -25243,7 +25243,8 @@ function setOwnTargetChanges_(session, input) {
       series,
       changedCount: deduped.size,
       targetCount,
-      clientRevision: Number(input.clientRevision || 0)
+      clientRevision: Number(input.clientRevision || 0),
+      elapsedMs: Date.now() - startedAt
     };
   } finally {
     releaseStorageWriteLock_(lock);
