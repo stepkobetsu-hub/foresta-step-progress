@@ -448,7 +448,7 @@
     queue.revision+=1;queue.pending={...readUnitState_(article),clientRevision:queue.revision,clientMutationId:`${Date.now()}-${queue.revision}`};
     article._failedState={...queue.pending};paintUnitOptimistic_(article,queue.pending);
     const status=article.querySelector('[data-save-state]');status.textContent='保存待ち…';status.className='saveState saving';article.querySelector('[data-retry-save]').classList.add('hidden');
-    setGlobalSave_('保存する','pending');clearTimeout(state.progressBatchTimer);state.progressBatchTimer=setTimeout(flushProgressBatch_,200);
+    setGlobalSave_('保存する','pending');clearTimeout(state.progressBatchTimer);state.progressBatchTimer=setTimeout(flushProgressBatch_,800);
   }
   async function flushProgressBatch_(){
     const requestStartedAt=performance.now();
@@ -477,7 +477,7 @@
       failSave_('保存に失敗しました［再試行］');toast(error.message||'保存に失敗しました');
     }finally{
       state.progressBatchInFlight=false;
-      if(Array.from(state.unitQueues.values()).some(queue=>queue.pending&&queue.inFlightRevision!==queue.pending.clientRevision)){clearTimeout(state.progressBatchTimer);state.progressBatchTimer=setTimeout(flushProgressBatch_,200)}
+      if(Array.from(state.unitQueues.values()).some(queue=>queue.pending&&queue.inFlightRevision!==queue.pending.clientRevision)){clearTimeout(state.progressBatchTimer);state.progressBatchTimer=setTimeout(flushProgressBatch_,800)}
     }
   }
   function bindUnitAutoSave_(units){
@@ -541,7 +541,7 @@
       }
     };
     queue.flush=flush;
-    const schedule=(changed,label)=>{changed.forEach(input=>queue.changes.set(input.value,input.checked));paint();status.textContent='変更あり';status.className='saveState saving';setGlobalSave_('保存する','pending');clearTimeout(queue.timer);queue.timer=setTimeout(flush,200)};
+    const schedule=(changed,label)=>{changed.forEach(input=>queue.changes.set(input.value,input.checked));paint();status.textContent='変更あり';status.className='saveState saving';setGlobalSave_('保存する','pending');clearTimeout(queue.timer);queue.timer=setTimeout(flush,800)};
     choices.forEach(input=>input.onchange=()=>schedule([input],'変更'));
     document.querySelectorAll('[data-chapter-check]').forEach(box=>box.onchange=()=>{const rows=choices.filter(input=>input.dataset.chapter===box.dataset.chapterCheck);rows.forEach(input=>input.checked=box.checked);schedule(rows,'章')});
     document.querySelectorAll('[data-chapter-select]').forEach(button=>button.onclick=()=>{const rows=choices.filter(input=>input.dataset.chapter===button.dataset.chapterSelect);rows.forEach(input=>input.checked=true);schedule(rows,'章')});
