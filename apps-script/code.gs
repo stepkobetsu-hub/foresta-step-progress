@@ -25078,7 +25078,7 @@ function saveVocabularyTargets_(session, input) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const rows = getRowsAsObjects_('StudentTargets');
+    const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const now = nowIso_();
     const currentByUnit = new Map(rows.filter(row =>
       String(row.studentId) === studentId &&
@@ -25158,7 +25158,7 @@ function setOwnTargetChanges_(session, input) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const rows = getRowsAsObjects_('StudentTargets');
+    const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const now = nowIso_();
     const rowByUnit = new Map(rows
       .filter(row =>
@@ -25392,7 +25392,7 @@ function setOwnTargetSelection_(session, input) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const currentRows = getRowsAsObjects_('StudentTargets');
+    const currentRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const currentByUnit = new Map(currentRows
       .filter(row =>
         String(row.studentId) === studentId &&
@@ -25444,7 +25444,7 @@ function setStudentTarget_(session, input) {
   const studentId = String(input.studentId || '');
   const unitId = String(input.unitId || '');
   const included = !!input.included;
-  const rows = getRowsAsObjects_('StudentTargets');
+  const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
   const current = rows.find(row => String(row.studentId) === studentId && String(row.unitId) === unitId);
   const unit = getRowsAsObjects_('Units').find(row => String(row.unitId) === unitId);
   if (!unit) throw new Error('単元が見つかりません。');
