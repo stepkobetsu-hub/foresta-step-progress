@@ -25142,11 +25142,12 @@ function setOwnTargetChanges_(session, input) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const rows = getRowsAsObjects_('StudentTargets');
+    // Read and update only this student's rows. Rewriting the whole
+    // StudentTargets table made every checkbox slower as the school grew.
+    const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const now = nowIso_();
     const rowByUnit = new Map(rows
       .filter(row =>
-        String(row.studentId) === studentId &&
         String(row.subject) === subject &&
         normalizeSeries_(row.series) === series
       )
@@ -25168,19 +25169,23 @@ function setOwnTargetChanges_(session, input) {
         series
       });
     });
-    const finalRows = rows.map(row => {
+    const additions = [];
+    replacements.forEach((row, unitId) => {
+      const current = rowByUnit.get(unitId);
+      if (current) updateObjectRowFast_('StudentTargets', current, row);
+      else additions.push(row);
+    });
+    appendObjectsFast_('StudentTargets', additions);
+
+    const mergedRows = rows.map(row => {
       if (
-        String(row.studentId) !== studentId ||
         String(row.subject) !== subject ||
         normalizeSeries_(row.series) !== series
       ) return row;
       return replacements.get(String(row.unitId)) || row;
     });
-    replacements.forEach((row, unitId) => {
-      if (!rowByUnit.has(unitId)) finalRows.push(row);
-    });
-    replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
-    const targetCount = getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, finalRows).length;
+    additions.forEach(row => mergedRows.push(row));
+    const targetCount = getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, mergedRows).length;
     appendAuditFast_(
       session,
       'SET_OWN_TARGET_CHANGES',
