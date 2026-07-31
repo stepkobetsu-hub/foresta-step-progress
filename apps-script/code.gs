@@ -24610,10 +24610,19 @@ function getCachedStudentSelectableUnits_(studentId, grade) {
 
 function putCachedStudentSelectableUnits_(studentId, grade, units) {
   try {
+    const cache = CacheService.getScriptCache();
+    const key = studentSelectableUnitsCacheKey_(studentId, grade);
+    if (cache.get(key) || cache.get(key + ':CHUNKS')) return;
+    const compactUnits = (units || []).map(unit => ({
+      unitId: String(unit.unitId || ''),
+      subject: String(unit.subject || ''),
+      series: normalizeSeries_(unit.series),
+      hasLct: isTrue_(unit.hasLct)
+    }));
     cachePutLargeJson_(
-      CacheService.getScriptCache(),
-      studentSelectableUnitsCacheKey_(studentId, grade),
-      units || [],
+      cache,
+      key,
+      compactUnits,
       600
     );
   } catch (ignored) {
