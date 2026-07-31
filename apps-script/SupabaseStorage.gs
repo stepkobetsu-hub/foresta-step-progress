@@ -4,7 +4,9 @@
 
 const SUPABASE_TABLES_ = Object.freeze({
   UnitProgress: 'learning_progress',
-  StudentTargets: 'student_targets'
+  StudentTargets: 'student_targets',
+  StudentProfiles: 'student_profiles',
+  Homework: 'homework'
 });
 
 function supabaseConfig_() {
@@ -100,6 +102,47 @@ function targetRowForSupabase_(row) {
   };
 }
 
+function profileRowForSupabase_(row) {
+  return {
+    student_id: String(row.studentId || ''),
+    name: String(row.name || ''),
+    campus: String(row.campus || ''),
+    grade: String(row.grade || ''),
+    grade_j_raw: String(row.gradeJRaw || ''),
+    grade_k_raw: String(row.gradeKRaw || ''),
+    grade_conflict: isTrue_(row.gradeConflict),
+    school: String(row.school || ''),
+    enrollment_status: String(row.enrollmentStatus || ''),
+    last_synced_at: nullableIso_(row.lastSyncedAt) || new Date().toISOString()
+  };
+}
+
+function homeworkRowForSupabase_(row) {
+  return {
+    homework_id: String(row.homeworkId || Utilities.getUuid()),
+    student_id: String(row.studentId || ''),
+    unit_id: String(row.unitId || ''),
+    homework_type: String(row.homeworkType || ''),
+    student_status: String(row.studentStatus || ''),
+    teacher_status: String(row.teacherStatus || ''),
+    student_updated_at: nullableIso_(row.studentUpdatedAt),
+    teacher_updated_at: nullableIso_(row.teacherUpdatedAt),
+    confirmed_by: String(row.confirmedBy || ''),
+    confirmation_memo: String(row.confirmationMemo || ''),
+    created_at: nullableIso_(row.createdAt) || new Date().toISOString(),
+    updated_at: nullableIso_(row.updatedAt) || new Date().toISOString(),
+    school_year: String(row.schoolYear || SCHOOL_YEAR),
+    round_number: normalizeRoundNumber_(row.roundNumber),
+    assigned_date: nullableDate_(row.assignedDate),
+    student_completed_at: nullableIso_(row.studentCompletedAt),
+    student_completed_date: nullableDate_(row.studentCompletedDate),
+    student_no_target_at: nullableIso_(row.studentNoTargetAt),
+    student_no_target_date: nullableDate_(row.studentNoTargetDate),
+    series: normalizeSeries_(row.series),
+    due_date: nullableDate_(row.dueDate)
+  };
+}
+
 function supabaseStorageEnabledFor_(sheetName) {
   if (!Object.prototype.hasOwnProperty.call(SUPABASE_TABLES_, sheetName)) return false;
   return supabaseConfig_().enabled;
@@ -149,6 +192,49 @@ function targetRowFromSupabase_(row, rowNumber) {
   };
 }
 
+function profileRowFromSupabase_(row, rowNumber) {
+  return {
+    _rowNumber: rowNumber,
+    studentId: row.student_id || '',
+    name: row.name || '',
+    campus: row.campus || '',
+    grade: row.grade || '',
+    gradeJRaw: row.grade_j_raw || '',
+    gradeKRaw: row.grade_k_raw || '',
+    gradeConflict: !!row.grade_conflict,
+    school: row.school || '',
+    enrollmentStatus: row.enrollment_status || '',
+    lastSyncedAt: row.last_synced_at || ''
+  };
+}
+
+function homeworkRowFromSupabase_(row, rowNumber) {
+  return {
+    _rowNumber: rowNumber,
+    homeworkId: row.homework_id || '',
+    studentId: row.student_id || '',
+    unitId: row.unit_id || '',
+    homeworkType: row.homework_type || '',
+    studentStatus: row.student_status || '',
+    teacherStatus: row.teacher_status || '',
+    studentUpdatedAt: row.student_updated_at || '',
+    teacherUpdatedAt: row.teacher_updated_at || '',
+    confirmedBy: row.confirmed_by || '',
+    confirmationMemo: row.confirmation_memo || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+    schoolYear: row.school_year || SCHOOL_YEAR,
+    roundNumber: normalizeRoundNumber_(row.round_number),
+    assignedDate: row.assigned_date || '',
+    studentCompletedAt: row.student_completed_at || '',
+    studentCompletedDate: row.student_completed_date || '',
+    studentNoTargetAt: row.student_no_target_at || '',
+    studentNoTargetDate: row.student_no_target_date || '',
+    series: normalizeSeries_(row.series),
+    dueDate: row.due_date || ''
+  };
+}
+
 function supabaseColumnForField_(fieldName) {
   return String(fieldName || '').replace(/[A-Z]/g, letter => '_' + letter.toLowerCase());
 }
@@ -173,14 +259,57 @@ function supabaseReadRows_(sheetName, fieldName, fieldValue) {
     rows.push.apply(rows, page);
     if (page.length < pageSize) break;
   }
-  const mapper = sheetName === 'UnitProgress'
-    ? progressRowFromSupabase_
-    : targetRowFromSupabase_;
+  const mappers = {
+    UnitProgress: progressRowFromSupabase_,
+    StudentTargets: targetRowFromSupabase_,
+    StudentProfiles: profileRowFromSupabase_,
+    Homework: homeworkRowFromSupabase_
+  };
+  const mapper = mappers[sheetName];
   return rows.map((row, index) => mapper(row, index + 2));
 }
 
+function supabaseReadStudentBundle_(studentId) {
+  const config = supabaseConfig_();
+  const definitions = [
+    {key: 'StudentTargets', table: SUPABASE_TABLES_.StudentTargets, mapper: targetRowFromSupabase_},
+    {key: 'UnitProgress', table: SUPABASE_TABLES_.UnitProgress, mapper: progressRowFromSupabase_},
+    {key: 'Homework', table: SUPABASE_TABLES_.Homework, mapper: homeworkRowFromSupabase_}
+  ];
+  const headers = {
+    apikey: config.serviceRoleKey,
+    Authorization: 'Bearer ' + config.serviceRoleKey,
+    Range: '0-999'
+  };
+  const responses = UrlFetchApp.fetchAll(definitions.map(definition => ({
+    url: config.url + '/rest/v1/' + definition.table +
+      '?select=*&student_id=eq.' + encodeURIComponent(String(studentId)),
+    method: 'get',
+    muteHttpExceptions: true,
+    headers
+  })));
+  const result = {};
+  responses.forEach((response, index) => {
+    const definition = definitions[index];
+    const status = response.getResponseCode();
+    if (status < 200 || status >= 300) {
+      throw new Error('Supabase API error (' + status + '): ' + response.getContentText().slice(0, 500));
+    }
+    const page = JSON.parse(response.getContentText() || '[]');
+    result[definition.key] = page.length >= 1000
+      ? supabaseReadRows_(definition.key, 'studentId', studentId)
+      : page.map((row, rowIndex) => definition.mapper(row, rowIndex + 2));
+  });
+  return result;
+}
+
 function supabaseWriteRows_(sheetName, rows) {
-  const validRows = (rows || []).filter(row => row && row.studentId && row.unitId);
+  const validRows = (rows || []).filter(row => {
+    if (!row) return false;
+    if (sheetName === 'StudentProfiles') return !!row.studentId;
+    if (sheetName === 'Homework') return !!(row.homeworkId && row.studentId && row.unitId);
+    return !!(row.studentId && row.unitId);
+  });
   if (!validRows.length) return;
   if (sheetName === 'UnitProgress') {
     supabaseUpsertBatches_(
@@ -198,7 +327,171 @@ function supabaseWriteRows_(sheetName, rows) {
     );
     return;
   }
+  if (sheetName === 'StudentProfiles') {
+    supabaseUpsertBatches_(
+      SUPABASE_TABLES_.StudentProfiles,
+      validRows.map(profileRowForSupabase_),
+      'student_id'
+    );
+    return;
+  }
+  if (sheetName === 'Homework') {
+    supabaseUpsertBatches_(
+      SUPABASE_TABLES_.Homework,
+      validRows.map(homeworkRowForSupabase_),
+      'homework_id'
+    );
+    return;
+  }
   throw new Error('Supabase対象外のデータです: ' + sheetName);
+}
+
+function sheetRowsForSupabaseMigration_(sheetName) {
+  const sheet = getSheet_(sheetName);
+  const values = sheet.getDataRange().getValues();
+  if (!values.length) return [];
+  return rowsFromValues_(values[0].map(String), values.slice(1), 2);
+}
+
+function studentPasswordHash_(password) {
+  const bytes = Utilities.computeHmacSha256Signature(
+    'STUDENT_AUTH:' + String(password || ''),
+    getRequiredProperty_(PROP.SESSION_SECRET),
+    Utilities.Charset.UTF_8
+  );
+  return bytes.map(byte => ('0' + ((byte + 256) % 256).toString(16)).slice(-2)).join('');
+}
+
+function authRowForSupabase_(record) {
+  const gradeJ = normalizeGrade_(record.gradeJRaw);
+  const gradeK = normalizeGrade_(record.gradeKRaw);
+  return {
+    student_id: String(record.studentId || ''),
+    password_hash: studentPasswordHash_(record.password),
+    status: String(record.status || ''),
+    name: String(record.name || ''),
+    campus: String(record.campus || ''),
+    grade_j_raw: String(record.gradeJRaw || ''),
+    grade_k_raw: String(record.gradeKRaw || ''),
+    grade: gradeJ || gradeK || '',
+    grade_conflict: !!(gradeJ && gradeK && gradeJ !== gradeK),
+    school: String(record.school || ''),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function getStudentAuthFromSupabase_(studentId) {
+  const response = supabaseRequest_(
+    'student_auth?select=*&student_id=eq.' + encodeURIComponent(String(studentId)) + '&limit=1',
+    'get'
+  );
+  const rows = JSON.parse(response.body || '[]');
+  return rows[0] || null;
+}
+
+function authenticateStudentWithSupabase_(studentId, password) {
+  const properties = PropertiesService.getScriptProperties();
+  const authEnabled = String(properties.getProperty('SUPABASE_AUTH_ENABLED') || '').toLowerCase() === 'true';
+  if (!supabaseConfig_().enabled || !authEnabled) return null;
+  const row = getStudentAuthFromSupabase_(studentId);
+  if (!row || !safeStringEquals_(String(row.password_hash || ''), studentPasswordHash_(password))) {
+    throw publicError_('生徒番号またはパスワードが違います。', 'INVALID_CREDENTIALS');
+  }
+  if (String(row.status) !== 'ACTIVE') {
+    throw publicError_('退塾・休塾等のためログインできません。教室へお問い合わせください。', 'STUDENT_INACTIVE');
+  }
+  if (!row.grade) {
+    throw publicError_('中学生の学年を確認できません。教室へお問い合わせください。', 'GRADE_NOT_FOUND');
+  }
+  return {
+    profile: {
+      studentId: String(row.student_id),
+      name: String(row.name || ''),
+      campus: String(row.campus || ''),
+      grade: String(row.grade || ''),
+      gradeJRaw: String(row.grade_j_raw || ''),
+      gradeKRaw: String(row.grade_k_raw || ''),
+      gradeConflict: !!row.grade_conflict,
+      school: String(row.school || ''),
+      enrollmentStatus: 'ACTIVE',
+      lastSyncedAt: String(row.updated_at || new Date().toISOString())
+    },
+    permissionLevel: '',
+    role: ROLE.STUDENT,
+    authStartedAt: Date.now(),
+    authTiming: {supabaseAuth: true}
+  };
+}
+
+function migrateLoginStorageToSupabase() {
+  const config = supabaseConfig_();
+  if (config.enabled) {
+    throw new Error('本番切替後は再移行できません。SUPABASE_ENABLED=true のまま使用してください。');
+  }
+  const profiles = sheetRowsForSupabaseMigration_('StudentProfiles')
+    .filter(row => row.studentId)
+    .map(profileRowForSupabase_);
+  const homework = sheetRowsForSupabaseMigration_('Homework')
+    .filter(row => row.homeworkId && row.studentId && row.unitId)
+    .map(homeworkRowForSupabase_);
+
+  const master = SpreadsheetApp.openById(getRequiredProperty_(PROP.STUDENT_MASTER_SS_ID));
+  const masterSheet = master.getSheetByName(getRequiredProperty_(PROP.STUDENT_MASTER_SHEET_NAME));
+  if (!masterSheet) throw new Error('生徒マスタの正本シートが見つかりません。');
+  const masterValues = masterSheet.getDataRange().getValues();
+  const authRows = [];
+  for (let index = 1; index < masterValues.length; index++) {
+    const record = studentAuthRecordFromRow_(masterValues[index], index + 1);
+    if (record && record.studentId && record.password) authRows.push(authRowForSupabase_(record));
+  }
+
+  supabaseUpsertBatches_('student_profiles', profiles, 'student_id');
+  supabaseUpsertBatches_('homework', homework, 'homework_id');
+  supabaseUpsertBatches_('student_auth', authRows, 'student_id');
+
+  const result = {
+    success: true,
+    profileSheetCount: profiles.length,
+    profileSupabaseCount: supabaseTableCount_('student_profiles'),
+    homeworkSheetCount: homework.length,
+    homeworkSupabaseCount: supabaseTableCount_('homework'),
+    authSourceCount: authRows.length,
+    authSupabaseCount: supabaseTableCount_('student_auth')
+  };
+  result.countsMatch =
+    result.profileSheetCount === result.profileSupabaseCount &&
+    result.homeworkSheetCount === result.homeworkSupabaseCount &&
+    result.authSourceCount === result.authSupabaseCount;
+  console.info(JSON.stringify({action: 'migrateLoginStorageToSupabase', result}));
+  return result;
+}
+
+function testSupabaseStudentTargetDeltaWrite() {
+  const rows = supabaseReadRows_('StudentTargets', 'studentId', 'TEST-STUDENT-01');
+  if (!rows.length) throw new Error('テスト生徒の目標範囲データが見つかりません。');
+  const original = rows[0];
+  const changed = Object.assign({}, original, {
+    included: !isTrue_(original.included),
+    updatedAt: new Date().toISOString(),
+    updatedBy: 'SUPABASE_DELTA_TEST'
+  });
+  const startedAt = Date.now();
+  try {
+    supabaseWriteRows_('StudentTargets', [changed]);
+    const saved = supabaseReadRows_('StudentTargets', 'studentId', 'TEST-STUDENT-01')
+      .find(row => String(row.unitId) === String(original.unitId));
+    if (!saved || isTrue_(saved.included) !== isTrue_(changed.included)) {
+      throw new Error('Supabase差分保存の確認に失敗しました。');
+    }
+  } finally {
+    supabaseWriteRows_('StudentTargets', [Object.assign({}, original, {
+      updatedAt: new Date().toISOString(),
+      updatedBy: 'SUPABASE_DELTA_TEST_RESTORE'
+    })]);
+  }
+  const result = {success: true, changedRows: 1, restored: true, elapsedMs: Date.now() - startedAt};
+  console.info(JSON.stringify({action: 'testSupabaseStudentTargetDeltaWrite', result}));
+  return result;
 }
 
 function supabaseUpsertBatches_(table, rows, conflictColumns) {

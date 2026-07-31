@@ -167,7 +167,11 @@
   const API_URL='https://script.google.com/macros/s/AKfycbwu8lfhiH3_7m4ogHNtbgeo3ehx_VBMnt1mPXsvIlL_kMSpxFdrRD4rO_I6q_JUXIWHmg/exec';
   const sleep_=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   function loginTrace_(stage,started,detail={}){console.info('[login]',stage,{elapsedMs:Math.round(performance.now()-started),at:new Date().toISOString(),...detail})}
-  const SAVE_ACTIONS_=new Set(['saveProgressBatch','saveStudentUnitProgressBatch','saveTargetRange','saveStudentTargetRange','saveHomework','updateHomework']);
+  const SAVE_ACTIONS_=new Set([
+    'saveProgressBatch','saveStudentUnitProgressBatch','saveTargetRange','saveStudentTargetRange','saveHomework','updateHomework',
+    'saveStudentProgressBatch','setOwnTargetChanges','saveVocabularyProgress','saveVocabularyTargets',
+    'confirmHomework','confirmHomeworkGroup','setStudentTarget'
+  ]);
   const DEDUPED_READ_ACTIONS_=new Set(['getSession','getStudentDashboard','getStudentInputHistory','listVocabularyProgress','listHomework','listOverdueHomeworkStudents','listAchievementHistory','getAdminStudentList','listUnitMaster','listGradeConflicts','listAuditLog']);
   function abortPendingReads_(){state.requestControllers.forEach((action,controller)=>{if(!SAVE_ACTIONS_.has(action)&&action!=='logout')controller.abort()})}
   function scheduleBackground_(task,delay=0){const lifecycle=state.lifecycleId;const timer=setTimeout(()=>{state.backgroundTimers.delete(timer);if(state.loggingOut||lifecycle!==state.lifecycleId)return;task()},delay);state.backgroundTimers.add(timer);return timer}
