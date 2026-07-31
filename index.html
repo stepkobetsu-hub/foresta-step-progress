@@ -139,7 +139,7 @@
       <h2 id="loginTitle">生徒ログイン</h2>
       <label class="field"><span id="idLabel">生徒番号</span><input id="loginId" autocomplete="username" required></label>
       <label class="field">パスワード<input id="password" type="password" autocomplete="current-password" required></label>
-      <div class="rememberLogin">
+      <div id="rememberBlock" class="rememberLogin">
         <label class="rememberChoice"><input id="rememberLogin" type="checkbox"><span>IDとパスワードをこの端末に記憶する</span></label>
         <p class="rememberNote">共有タブレットでは、チェックを入れないでください。</p>
         <button id="clearRemembered" class="clearRemembered hidden" type="button">保存したログイン情報を消す</button>
@@ -227,6 +227,11 @@
   function hasPendingSaves_(){return state.pendingSaves>0||!!state.progressBatchTimer||state.progressBatchInFlight||Array.from(state.unitQueues.values()).some(queue=>queue.pending)||!!(state.targetQueue&&(state.targetQueue.timer||state.targetQueue.inFlight))}
   
   const PERSISTED_SESSION_KEY='forestaProgress.rememberedSession';
+  const COMMON_TOKEN_KEY='stepCommonStudentSessionToken';
+  const COMMON_EXPIRES_KEY='stepCommonStudentSessionExpiresAt';
+  function readCommonSession_(){try{const token=localStorage.getItem(COMMON_TOKEN_KEY)||'',expiresAt=localStorage.getItem(COMMON_EXPIRES_KEY)||'';return token&&expiresAt&&new Date(expiresAt).getTime()>Date.now()?{token,expiresAt}:null}catch(error){return null}}
+  function saveCommonSession_(token,expiresAt){try{localStorage.setItem(COMMON_TOKEN_KEY,String(token||''));localStorage.setItem(COMMON_EXPIRES_KEY,String(expiresAt||''))}catch(error){}}
+  function clearCommonSession_(){try{localStorage.removeItem(COMMON_TOKEN_KEY);localStorage.removeItem(COMMON_EXPIRES_KEY)}catch(error){}}
   function saveStoredSession_(value,persist){const json=JSON.stringify(value);sessionStorage.setItem('fsSession',json);try{if(persist)localStorage.setItem(PERSISTED_SESSION_KEY,json);else localStorage.removeItem(PERSISTED_SESSION_KEY)}catch(error){}}
   function readStoredSession_(){try{return JSON.parse(sessionStorage.getItem('fsSession')||((hasRememberedLogin_()&&localStorage.getItem(PERSISTED_SESSION_KEY))||'null'))}catch(error){return null}}
   function clearStoredSession_(){sessionStorage.removeItem('fsSession');try{localStorage.removeItem(PERSISTED_SESSION_KEY)}catch(error){}}
@@ -238,9 +243,19 @@
   function readRememberedLogin_(type){try{const keys=REMEMBER_KEYS[type];if(localStorage.getItem(keys.enabled)!=='true')return null;const id=localStorage.getItem(keys.id)||'',password=localStorage.getItem(keys.passKey)||'';return id&&password?{id,password}:null}catch(error){return null}}
   function hasRememberedLogin_(){return !!(readRememberedLogin_('student')||readRememberedLogin_('staff'))}
   function restoreRememberedLogin_(type){const saved=readRememberedLogin_(type);$('loginId').value=saved?.id||'';$('password').value=saved?.password||'';$('rememberLogin').checked=!!saved;$('clearRemembered').classList.toggle('hidden',!hasRememberedLogin_())}
-  function updateRememberedLogin_(type,id,password,enabled){try{const keys=REMEMBER_KEYS[type];if(enabled){localStorage.setItem(keys.enabled,'true');localStorage.setItem(keys.id,id);localStorage.setItem(keys.passKey,password);localStorage.setItem(REMEMBER_KEYS.type,type)}else{localStorage.removeItem(keys.enabled);localStorage.removeItem(keys.id);localStorage.removeItem(keys.passKey);if(localStorage.getItem(REMEMBER_KEYS.type)===type)localStorage.removeItem(REMEMBER_KEYS.type)}}catch(error){}}
+  function updateRememberedLogin_(type,id,password,enabled){
+    try{
+      const keys=REMEMBER_KEYS[type];
+      if(type==='student'){
+        localStorage.removeItem(keys.enabled);localStorage.removeItem(keys.id);localStorage.removeItem(keys.passKey);
+        return;
+      }
+      if(enabled){localStorage.setItem(keys.enabled,'true');localStorage.setItem(keys.id,id);localStorage.setItem(keys.passKey,password);localStorage.setItem(REMEMBER_KEYS.type,type)}
+      else{localStorage.removeItem(keys.enabled);localStorage.removeItem(keys.id);localStorage.removeItem(keys.passKey);if(localStorage.getItem(REMEMBER_KEYS.type)===type)localStorage.removeItem(REMEMBER_KEYS.type)}
+    }catch(error){}
+  }
   function clearAllRememberedLogins_(){clearStoredSession_();try{['student','staff'].forEach(type=>{const keys=REMEMBER_KEYS[type];localStorage.removeItem(keys.enabled);localStorage.removeItem(keys.id);localStorage.removeItem(keys.passKey)});localStorage.removeItem(REMEMBER_KEYS.type)}catch(error){}$('loginId').value='';$('password').value='';$('rememberLogin').checked=false;$('clearRemembered').classList.add('hidden')}
-  function setLoginType(type){if(state.loginInFlight)return;state.loginType=type;$('studentTab').classList.toggle('active',type==='student');$('staffTab').classList.toggle('active',type==='staff');$('loginTitle').textContent=type==='student'?'生徒ログイン':'講師・管理者ログイン';$('idLabel').textContent=type==='student'?'生徒番号':'講師番号';$('loginError').textContent='';restoreRememberedLogin_(type)}
+  function setLoginType(type){if(state.loginInFlight)return;state.loginType=type;$('studentTab').classList.toggle('active',type==='student');$('staffTab').classList.toggle('active',type==='staff');$('loginTitle').textContent=type==='student'?'生徒ログイン':'講師・管理者ログイン';$('idLabel').textContent=type==='student'?'生徒番号':'講師番号';$('rememberBlock').classList.toggle('hidden',type==='student');$('loginError').textContent='';restoreRememberedLogin_(type)}
   $('studentTab').onclick=()=>setLoginType('student');$('staffTab').onclick=()=>setLoginType('staff');
   $('clearRemembered').onclick=()=>{if(confirm('この端末に保存したIDとパスワードを削除しますか？'))clearAllRememberedLogins_()};
   $('loginForm').onsubmit=async event=>{
@@ -258,8 +273,9 @@
       status.dataset.authTiming=JSON.stringify({roundTripMs:Math.round(performance.now()-started),server:out._timing||null});
       updateRememberedLogin_(loginType,enteredId,enteredPassword,$('rememberLogin').checked);$('password').value='';
       state.token=out.token;state.role=out.role;state.profile=out.profile;
+      if(out.role==='STUDENT')saveCommonSession_(out.token,out.expiresAt);
       if(out.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}
-      saveStoredSession_({token:out.token,role:out.role,profile:out.profile,expiresAt:out.expiresAt},$('rememberLogin').checked);
+      saveStoredSession_({token:out.token,role:out.role,profile:out.profile,expiresAt:out.expiresAt},out.role!=='STUDENT'&&$('rememberLogin').checked);
       status.className='loginStatus success';status.textContent='ログインしました';
       $('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';$('main').innerHTML='<section class="card panel"><div class="empty"><h2>ログインしました</h2><p>学習データを読み込んでいます…</p></div></section>';
       loginTrace_('initial-screen-visible',started);
@@ -270,7 +286,7 @@
       status.textContent='';$('application').classList.add('hidden');$('login').classList.remove('hidden');
     }finally{state.loginInFlight=false;button.disabled=false;button.textContent='ログイン'}
   };
-  $('logout').onclick=()=>{const button=$('logout');if(button.disabled||state.loggingOut)return;button.disabled=true;const token=state.token,hadPendingSaves=hasPendingSaves_();if(hadPendingSaves)saveNow_();state.loggingOut=true;state.lifecycleId+=1;abortPendingReads_();cancelPendingWork_();clearStudentViewCache_();clearStoredSession_();state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;state.studentLandingPending=false;state.unitQueues.clear();state.targetQueue=null;state.pendingSaves=0;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType);button.disabled=false;const finishServerLogout=()=>{if(!token)return;void rpc({action:'logout',token},{attempts:1,timeoutMs:15000,allowDuringLogout:true}).catch(()=>{})};setTimeout(finishServerLogout,hadPendingSaves?2500:0)};
+  $('logout').onclick=()=>{const button=$('logout');if(button.disabled||state.loggingOut)return;button.disabled=true;const token=state.token,role=state.role,hadPendingSaves=hasPendingSaves_();if(hadPendingSaves)saveNow_();state.loggingOut=true;state.lifecycleId+=1;abortPendingReads_();cancelPendingWork_();clearStudentViewCache_();clearStoredSession_();if(role==='STUDENT')clearCommonSession_();state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;state.studentLandingPending=false;state.unitQueues.clear();state.targetQueue=null;state.pendingSaves=0;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType);button.disabled=false;const finishServerLogout=()=>{if(!token)return;void rpc({action:'logout',token},{attempts:1,timeoutMs:15000,allowDuringLogout:true}).catch(()=>{})};setTimeout(finishServerLogout,hadPendingSaves?2500:0)};
   function confirmLogout_(){return new Promise(resolve=>{const old=$('logoutConfirm');if(old)old.remove();const modal=document.createElement('div');modal.id='logoutConfirm';modal.className='logoutConfirm';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-labelledby','logoutConfirmTitle');modal.innerHTML='<div class="logoutConfirmCard"><h2 id="logoutConfirmTitle">ログアウトしますか？</h2><p>保存済みの内容はそのまま残ります。</p><div class="logoutConfirmActions"><button type="button" class="logoutCancel">キャンセル</button><button type="button" class="logoutProceed">ログアウト</button></div></div>';const finish=value=>{modal.remove();resolve(value)};modal.querySelector('.logoutCancel').onclick=()=>finish(false);modal.querySelector('.logoutProceed').onclick=()=>finish(true);modal.onclick=event=>{if(event.target===modal)finish(false)};document.body.appendChild(modal);modal.querySelector('.logoutCancel').focus()})}
   function renderStudentShell_(){const name=esc(state.profile?.name||'');$('main').innerHTML=`<div class="studentWelcome"><div><p class="eyebrow">学習進捗管理</p><h1>${name}さん</h1><div class="muted">必要なデータから順に読み込んでいます</div></div></div><div class="viewTabs"><button class="active">📚 次回の宿題</button><button>✏️ 進捗入力</button><button>🎯 目標範囲</button></div><section class="card panel"><div class="panelHead"><h2>宿題チェック</h2><span class="badge">読込中…</span></div><div class="unitList"><div class="unit">宿題を読み込んでいます…</div><div class="unit">画面はこのまま操作できます</div></div></section>`}
   async function showApp(){if(state.loggingOut)return;$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';if(state.role==='STUDENT')renderStudentShell_();else $('main').innerHTML='<section class="card panel"><div class="empty"><p>データを読み込んでいます…</p></div></section>';try{if(state.role==='STUDENT')await renderStudent();else if(state.role==='TEACHER')await renderTeacher();else await renderAdmin()}catch(error){renderLoadError(error)}}
@@ -653,7 +669,28 @@
     paintResults();
   }
   let initialLoginType='student';try{const savedType=localStorage.getItem(REMEMBER_KEYS.type);if(savedType==='student'||savedType==='staff')initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);
-  (async()=>{let resumed=false;const saved=readStoredSession_();try{if(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now())){state.token=saved.token;state.role=saved.role;state.profile=saved.profile;if(saved.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=saved.profile?.name||'';if(saved.role==='STUDENT'){if(state.homeworkCache){state.studentLandingPending=false;await renderStudentHomeworkOnly_()}else renderStudentShell_()}else $('main').innerHTML='<section class="card panel"><div class="empty"><p>データを確認しています…</p></div></section>';await call('getSession');resumed=true;await showApp()}}catch(error){clearStoredSession_();state.token='';state.role='';state.profile=null}if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden')}}})();
+  (async()=>{
+    let resumed=false;
+    let saved=readStoredSession_();
+    const common=readCommonSession_();
+    try{
+      if((!saved||!saved.token)&&common){
+        const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:30000});
+        if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');
+        saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};
+        saveStoredSession_(saved,false);
+      }
+      if(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now())){
+        state.token=saved.token;state.role=saved.role;state.profile=saved.profile;
+        if(saved.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}
+        $('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=saved.profile?.name||'';
+        if(saved.role==='STUDENT'){if(state.homeworkCache){state.studentLandingPending=false;await renderStudentHomeworkOnly_()}else renderStudentShell_()}
+        else $('main').innerHTML='<section class="card panel"><div class="empty"><p>データを確認しています…</p></div></section>';
+        await call('getSession');resumed=true;await showApp();
+      }
+    }catch(error){clearStoredSession_();if(common)clearCommonSession_();state.token='';state.role='';state.profile=null}
+    if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden')}}
+  })();
 </script>
 </body>
 </html>

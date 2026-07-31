@@ -56,6 +56,15 @@ const PROP = Object.freeze({
   DEV_TEST_STAFF_PASSWORD: 'DEV_TEST_STAFF_PASSWORD'
 });
 
+const COMMON_GRADE_SOURCE = 'https://stepkobetsu-hub.github.io/seiseki-kanri/juku_app.html';
+const COMMON_GRADE_ACTIONS = Object.freeze([
+  'getStudentScores', 'saveScore', 'deleteScore',
+  'getWish', 'saveWish',
+  'getReport', 'saveReport', 'deleteReport', 'getReports',
+  'getSchools'
+]);
+const COMMON_GRADE_ENDPOINT_CACHE_KEY = 'STEP:COMMON:GRADE_ENDPOINT';
+
 const ROLE = Object.freeze({
   STUDENT: 'STUDENT',
   TEACHER: 'TEACHER',
@@ -26276,6 +26285,70 @@ function setStandardRange_(session, input) {
   return {success: true};
 }
 
+function getCommonStudentProfile_(session) {
+  requireRole_(session, [ROLE.STUDENT]);
+  const profile = getCachedStudentProfile_(session.userId);
+  if (!profile || String(profile.studentId || '') !== String(session.userId || '')) {
+    throw publicError_('生徒情報を確認できません。', 'STUDENT_NOT_FOUND');
+  }
+  return {
+    studentId: String(session.userId),
+    name: String(profile.name || ''),
+    campus: String(profile.campus || ''),
+    grade: String(profile.grade || ''),
+    school: String(profile.school || '')
+  };
+}
+
+function resolveCommonGradeEndpoint_() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(COMMON_GRADE_ENDPOINT_CACHE_KEY);
+  if (cached) return cached;
+  const response = UrlFetchApp.fetch(COMMON_GRADE_SOURCE, {
+    method: 'get',
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+  if (response.getResponseCode() < 200 || response.getResponseCode() >= 300) {
+    throw new Error('成績管理の接続設定を確認できません。');
+  }
+  const source = response.getContentText();
+  const match = source.match(/https:\/\/script\.google\.com\/macros\/s\/[^'"\s]+\/exec/);
+  if (!match) throw new Error('成績管理の接続設定を確認できません。');
+  cache.put(COMMON_GRADE_ENDPOINT_CACHE_KEY, match[0], 21600);
+  return match[0];
+}
+
+function commonGradeRequest_(session, input) {
+  const profile = getCommonStudentProfile_(session);
+  const requestedAction = String(input.gradeAction || '');
+  if (COMMON_GRADE_ACTIONS.indexOf(requestedAction) < 0) {
+    throw publicError_('成績管理で許可されていない操作です。', 'FORBIDDEN');
+  }
+  const requested = input.payload && typeof input.payload === 'object' ? input.payload : {};
+  const payload = Object.assign({}, requested, {
+    action: requestedAction,
+    studentId: profile.studentId,
+    name: profile.name,
+    campus: profile.campus,
+    grade: profile.grade,
+    school: profile.school
+  });
+  delete payload.token;
+  delete payload.commonSessionToken;
+  const response = UrlFetchApp.fetch(resolveCommonGradeEndpoint_(), {
+    method: 'post',
+    contentType: 'text/plain;charset=utf-8',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+  let result;
+  try { result = JSON.parse(response.getContentText()); } catch (error) { result = null; }
+  if (!result || typeof result !== 'object') throw new Error('成績管理から正しい応答がありません。');
+  return result;
+}
+
 // ===== Api.gs =====
 function doGet() {
   return jsonOutput_({
@@ -26408,6 +26481,10 @@ function routeAuthenticatedApi_(action, input, session) {
   switch (action) {
     case 'getSession':
       return {success: true, userId: session.userId, role: session.role, permissionLevel: session.permissionLevel};
+    case 'getCommonStudentSession':
+      return {success: true, profile: getCommonStudentProfile_(session), role: ROLE.STUDENT};
+    case 'commonGradeRequest':
+      return commonGradeRequest_(session, input);
     case 'getStudentDashboard':
       return {success: true, data: getStudentDashboard_(session, input.studentId)};
     case 'getStudentInputHistory':
