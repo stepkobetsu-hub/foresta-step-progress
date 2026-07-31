@@ -451,6 +451,7 @@
     setGlobalSave_('保存する','pending');clearTimeout(state.progressBatchTimer);state.progressBatchTimer=setTimeout(flushProgressBatch_,800);
   }
   async function flushProgressBatch_(){
+    const requestStartedAt=performance.now();
     state.progressBatchTimer=null;if(state.progressBatchInFlight)return;
     const entries=Array.from(state.unitQueues.values()).filter(queue=>queue.pending&&queue.inFlightRevision!==queue.pending.clientRevision);
     if(!entries.length)return;
@@ -470,7 +471,7 @@
           queue.pending=null;if(article){applyUnitState_(article,queue.saved);paintUnitOptimistic_(article,queue.saved);article._failedState={...payload};const status=article.querySelector('[data-save-state]');if(status){status.textContent='保存に失敗';status.className='saveState failed'}article.querySelector('[data-retry-save]')?.classList.remove('hidden')}
         }
       });
-      const failed=(out.results||[]).filter(result=>!result.success);if(failed.length)failSave_(`${failed.length}件の保存に失敗しました［再試行］`);else endSave_('保存済み');
+      const failed=(out.results||[]).filter(result=>!result.success),totalSeconds=((performance.now()-requestStartedAt)/1000).toFixed(1),serverSeconds=(Number(out.elapsedMs||0)/1000).toFixed(1);if(failed.length)failSave_(`${failed.length}件の保存に失敗しました［再試行］`);else endSave_(`保存済み（通信 ${totalSeconds}秒／処理 ${serverSeconds}秒）`);
     }catch(error){
       sent.forEach(({queue,payload,revision})=>{if(queue.revision!==revision)return;queue.pending=null;const article=document.querySelector(`[data-unit="${CSS.escape(String(payload.unitId))}"][data-round="${payload.roundNumber}"]`);if(article){applyUnitState_(article,queue.saved);paintUnitOptimistic_(article,queue.saved);article._failedState={...payload};const status=article.querySelector('[data-save-state]');if(status){status.textContent='保存に失敗';status.className='saveState failed'}article.querySelector('[data-retry-save]')?.classList.remove('hidden')}});
       failSave_('保存に失敗しました［再試行］');toast(error.message||'保存に失敗しました');
@@ -525,13 +526,14 @@
     const queue=state.targetQueue={changes:new Map(),revision:0,timer:null,inFlight:false,flush:null};
     const updateCache=out=>{const d=state.dashboardCache;if(!d)return;const delta=Number(out.targetCount)-cachedSeriesTargetCount,subject=d.subjects.find(item=>item.subject===state.subject);cachedSeriesTargetCount=Number(out.targetCount);if(subject){subject.targetCount+=delta;subject.progressRate=subject.targetCount?subject.completedCount/subject.targetCount:null}d.overall.targetCount+=delta;d.overall.progressRate=d.overall.targetCount?d.overall.completedCount/d.overall.targetCount:null;const candidates=d.selectableUnits.filter(unit=>unit.subject===state.subject&&unit.series===state.series);candidates.forEach(unit=>unit.targetIncluded=!!saved.get(String(unit.unitId)));const byId=new Map(d.units.map(unit=>[String(unit.unitId),unit]));candidates.forEach(unit=>{const included=!!saved.get(String(unit.unitId));if(included&&!byId.has(String(unit.unitId)))d.units.push({...unit,lctResult:'',pointConfirmed:false,warmupConfirmed:false,tryCompleted:false,learningDate:'',rounds:[1,2,3].map(roundNumber=>({roundNumber,lctResult:'',pointConfirmed:false,warmupConfirmed:false,tryCompleted:false,learningDate:''}))})});d.units=d.units.filter(unit=>unit.subject!==state.subject||unit.series!==state.series||saved.get(String(unit.unitId)))};
     const flush=async()=>{
+      const requestStartedAt=performance.now();
       queue.timer=null;if(queue.inFlight||!queue.changes.size)return;
       queue.inFlight=true;queue.revision+=1;const revision=queue.revision;const sent=new Map(queue.changes);beginSave_();
       status.textContent=`${sent.size}件を保存中…`;status.className='saveState saving';
       try{
         const out=await call('setOwnTargetChanges',{subject:state.subject,series:state.series,changes:Array.from(sent,([unitId,selected])=>({unitId,selected})),clientRevision:revision});
         sent.forEach((selected,unitId)=>{saved.set(unitId,selected);if(queue.changes.get(unitId)===selected)queue.changes.delete(unitId)});
-        updateCache(out);status.textContent=`${out.changedCount}件を保存しました（選択${out.targetCount}）`;status.className='saveState';endSave_('すべて保存済み');
+        const totalSeconds=((performance.now()-requestStartedAt)/1000).toFixed(1),serverSeconds=(Number(out.elapsedMs||0)/1000).toFixed(1);updateCache(out);status.textContent=`保存しました（通信${totalSeconds}秒／処理${serverSeconds}秒）`;status.className='saveState';endSave_(`すべて保存済み（通信 ${totalSeconds}秒／処理 ${serverSeconds}秒）`);
       }catch(error){
         sent.forEach((selected,unitId)=>{if(queue.changes.get(unitId)===selected){const input=choices.find(choice=>choice.value===unitId);if(input)input.checked=!!saved.get(unitId);queue.changes.delete(unitId)}});paint();status.textContent='保存に失敗しました';status.className='saveState failed';failSave_();toast(error.message||'保存に失敗しました');
       }finally{
