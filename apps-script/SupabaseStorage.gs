@@ -100,6 +100,107 @@ function targetRowForSupabase_(row) {
   };
 }
 
+function supabaseStorageEnabledFor_(sheetName) {
+  if (!Object.prototype.hasOwnProperty.call(SUPABASE_TABLES_, sheetName)) return false;
+  return supabaseConfig_().enabled;
+}
+
+function progressRowFromSupabase_(row, rowNumber) {
+  return {
+    _rowNumber: rowNumber,
+    progressId: row.progress_id || '',
+    studentId: row.student_id || '',
+    unitId: row.unit_id || '',
+    pointConfirmed: !!row.point_confirmed,
+    warmupConfirmed: !!row.warmup_confirmed,
+    tryCompleted: !!row.try_completed,
+    tryResult: row.try_result || '',
+    studentUpdatedAt: row.student_updated_at || '',
+    updatedAt: row.updated_at || '',
+    updatedBy: row.updated_by || '',
+    lctResult: row.lct_result || '',
+    lctDate: row.lct_date || '',
+    learningDate: row.learning_date || '',
+    pointCompletedAt: row.point_completed_at || '',
+    warmupCompletedAt: row.warmup_completed_at || '',
+    tryCompletedAt: row.try_completed_at || '',
+    clientRevision: Number(row.client_revision || 0),
+    clientMutationId: row.client_mutation_id || '',
+    schoolYear: row.school_year || SCHOOL_YEAR,
+    roundNumber: normalizeRoundNumber_(row.round_number),
+    series: normalizeSeries_(row.series)
+  };
+}
+
+function targetRowFromSupabase_(row, rowNumber) {
+  return {
+    _rowNumber: rowNumber,
+    studentTargetId: row.student_target_id || '',
+    studentId: row.student_id || '',
+    masterVersion: row.master_version || MASTER_VERSION,
+    subject: row.subject || '',
+    unitId: row.unit_id || '',
+    included: !!row.included,
+    source: row.source || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || '',
+    updatedBy: row.updated_by || '',
+    series: normalizeSeries_(row.series)
+  };
+}
+
+function supabaseColumnForField_(fieldName) {
+  return String(fieldName || '').replace(/[A-Z]/g, letter => '_' + letter.toLowerCase());
+}
+
+function supabaseReadRows_(sheetName, fieldName, fieldValue) {
+  const table = SUPABASE_TABLES_[sheetName];
+  if (!table) throw new Error('Supabase対象外のデータです: ' + sheetName);
+  const filters = fieldName
+    ? '&' + encodeURIComponent(supabaseColumnForField_(fieldName)) +
+      '=eq.' + encodeURIComponent(String(fieldValue))
+    : '';
+  const pageSize = 1000;
+  const rows = [];
+  for (let start = 0; ; start += pageSize) {
+    const response = supabaseRequest_(
+      table + '?select=*' + filters,
+      'get',
+      null,
+      {Range: start + '-' + (start + pageSize - 1)}
+    );
+    const page = JSON.parse(response.body || '[]');
+    rows.push.apply(rows, page);
+    if (page.length < pageSize) break;
+  }
+  const mapper = sheetName === 'UnitProgress'
+    ? progressRowFromSupabase_
+    : targetRowFromSupabase_;
+  return rows.map((row, index) => mapper(row, index + 2));
+}
+
+function supabaseWriteRows_(sheetName, rows) {
+  const validRows = (rows || []).filter(row => row && row.studentId && row.unitId);
+  if (!validRows.length) return;
+  if (sheetName === 'UnitProgress') {
+    supabaseUpsertBatches_(
+      SUPABASE_TABLES_.UnitProgress,
+      validRows.map(progressRowForSupabase_),
+      'student_id,unit_id,school_year,round_number'
+    );
+    return;
+  }
+  if (sheetName === 'StudentTargets') {
+    supabaseUpsertBatches_(
+      SUPABASE_TABLES_.StudentTargets,
+      validRows.map(targetRowForSupabase_),
+      'student_id,unit_id'
+    );
+    return;
+  }
+  throw new Error('Supabase対象外のデータです: ' + sheetName);
+}
+
 function supabaseUpsertBatches_(table, rows, conflictColumns) {
   const batchSize = 200;
   for (let index = 0; index < rows.length; index += batchSize) {
