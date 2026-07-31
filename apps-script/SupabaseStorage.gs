@@ -390,7 +390,9 @@ function getStudentAuthFromSupabase_(studentId) {
 }
 
 function authenticateStudentWithSupabase_(studentId, password) {
-  if (!supabaseConfig_().enabled) return null;
+  const properties = PropertiesService.getScriptProperties();
+  const authEnabled = String(properties.getProperty('SUPABASE_AUTH_ENABLED') || '').toLowerCase() === 'true';
+  if (!supabaseConfig_().enabled || !authEnabled) return null;
   const row = getStudentAuthFromSupabase_(studentId);
   if (!row || !safeStringEquals_(String(row.password_hash || ''), studentPasswordHash_(password))) {
     throw publicError_('生徒番号またはパスワードが違います。', 'INVALID_CREDENTIALS');
