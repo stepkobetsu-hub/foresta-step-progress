@@ -413,6 +413,9 @@ function getRowsByFieldValue_(sheetName, fieldName, fieldValue) {
 }
 
 function getFirstRowByFieldValue_(sheetName, fieldName, fieldValue) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    return supabaseReadRows_(sheetName, fieldName, fieldValue)[0] || null;
+  }
   const startedAt = Date.now();
   const sheet = getSheet_(sheetName);
   const headers = DB_SCHEMAS[sheetName] || [];
@@ -519,6 +522,19 @@ function replaceAllObjectRowsFast_(sheetName, rows, previousCount) {
     return headers.map(header => row && row[header] != null ? row[header] : '');
   });
   sheet.getRange(2, 1, writeCount, headers.length).setValues(values);
+}
+
+function acquireStorageWriteLock_(sheetName) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_(sheetName)) {
+    return null;
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  return lock;
+}
+
+function releaseStorageWriteLock_(lock) {
+  if (lock) lock.releaseLock();
 }
 
 function appendAuditFast_(session, action, entityType, entityId, beforeValue, afterValue) {
@@ -24193,6 +24209,10 @@ function authenticateStudent_(studentId, password) {
     testAuth.authStartedAt = startedAt;
     return testAuth;
   }
+  if (typeof authenticateStudentWithSupabase_ === 'function') {
+    const supabaseAuth = authenticateStudentWithSupabase_(id, pass);
+    if (supabaseAuth) return supabaseAuth;
+  }
 
   const lookup = getStudentAuthRecord_(id);
   Object.assign(timing, lookup.timing || {});
@@ -24419,6 +24439,11 @@ function safeStringEquals_(expected, actual) {
 }
 
 function upsertStudentProfile_(profile) {
+  if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentProfiles')) {
+    supabaseWriteRows_('StudentProfiles', [profile]);
+    cacheStudentProfile_(profile);
+    return;
+  }
   const sheet = getSheet_('StudentProfiles');
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
   const studentIdColumn = headers.indexOf('studentId') + 1;
@@ -24559,6 +24584,61 @@ function getStudentTargetUnitIds_(studentId, subject, series) {
   );
 }
 
+function studentTargetIdsCacheKey_(studentId, grade) {
+  return ['FS','TARGET_IDS',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,String(studentId),String(grade||'')].join(':');
+}
+
+function getCachedStudentTargetIds_(studentId, grade) {
+  const value = CacheService.getScriptCache().get(studentTargetIdsCacheKey_(studentId, grade));
+  if (!value) return null;
+  try { return JSON.parse(value); } catch (error) { return null; }
+}
+
+function putCachedStudentTargetIds_(studentId, grade, unitIds) {
+  CacheService.getScriptCache().put(
+    studentTargetIdsCacheKey_(studentId, grade),
+    JSON.stringify(unitIds || []),
+    600
+  );
+}
+
+function studentSelectableUnitsCacheKey_(studentId, grade) {
+  return ['FS','STUDENT_UNITS',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,String(studentId),String(grade||'')].join(':');
+}
+
+function getCachedStudentSelectableUnits_(studentId, grade) {
+  try {
+    return cacheGetLargeJson_(
+      CacheService.getScriptCache(),
+      studentSelectableUnitsCacheKey_(studentId, grade)
+    );
+  } catch (error) {
+    return null;
+  }
+}
+
+function putCachedStudentSelectableUnits_(studentId, grade, units) {
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = studentSelectableUnitsCacheKey_(studentId, grade);
+    if (cache.get(key) || cache.get(key + ':CHUNKS')) return;
+    const compactUnits = (units || []).map(unit => ({
+      unitId: String(unit.unitId || ''),
+      subject: String(unit.subject || ''),
+      series: normalizeSeries_(unit.series),
+      hasLct: isTrue_(unit.hasLct)
+    }));
+    cachePutLargeJson_(
+      cache,
+      key,
+      compactUnits,
+      600
+    );
+  } catch (ignored) {
+    // Cache failure must not prevent dashboard display or saving.
+  }
+}
+
 function targetSelectionStartsEmpty_(subject, series) {
   const normalizedSeries = normalizeSeries_(series);
   return normalizedSeries === MATERIAL_SERIES.REQUIRED_TEXTBOOK ||
@@ -24609,13 +24689,24 @@ function getStudentDashboard_(session, requestedStudentId) {
   const studentId = resolveStudentId_(session, requestedStudentId, [ROLE.TEACHER, ROLE.ADMIN]);
   const profile = getCachedStudentProfile_(studentId);
   if (!profile) throw new Error('生徒情報が見つかりません。');
-  const studentTargets = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
+  const useSupabaseBundle =
+    typeof supabaseReadStudentBundle_ === 'function' &&
+    typeof supabaseStorageEnabledFor_ === 'function' &&
+    ['StudentTargets','UnitProgress','Homework'].every(supabaseStorageEnabledFor_);
+  const studentBundle = useSupabaseBundle ? supabaseReadStudentBundle_(studentId) : null;
+  const studentTargets = studentBundle
+    ? studentBundle.StudentTargets
+    : getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
   const targets = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', studentTargets);
+  putCachedStudentTargetIds_(studentId, profile.grade, targets);
   const targetSet = new Set(targets);
-  const studentProgress = getRowsByFieldValue_('UnitProgress', 'studentId', studentId)
+  const studentProgress = (studentBundle
+    ? studentBundle.UnitProgress
+    : getRowsByFieldValue_('UnitProgress', 'studentId', studentId))
     .filter(row => rowSchoolYear_(row) === SCHOOL_YEAR);
   const progress = studentProgress.filter(row => targetSet.has(String(row.unitId)));
   const selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+  putCachedStudentSelectableUnits_(studentId, profile.grade, selectableUnits);
   const units = selectableUnits.filter(row => targetSet.has(String(row.unitId)));
   const selectableById = new Map(selectableUnits.map(unit => [String(unit.unitId), unit]));
   const progressMap = new Map(progress.map(row => [
@@ -24634,7 +24725,9 @@ function getStudentDashboard_(session, requestedStudentId) {
     return {subject, targetCount: ids.length, completedCount: done, progressRate: ids.length ? done / ids.length : null, rounds};
   });
   const homework = filterHomeworkByLessonProgress_(
-    getRowsByFieldValue_('Homework', 'studentId', studentId),
+    studentBundle
+      ? studentBundle.Homework
+      : getRowsByFieldValue_('Homework', 'studentId', studentId),
     studentProgress
   );
   const today = todayInJapan_();
@@ -24806,27 +24899,46 @@ function saveStudentProgressBatch_(session, input) {
 }
 
 function saveStudentProgress_(session, input) {
+  const timing = {};
+  let timingStartedAt = Date.now();
+  const markTiming = name => {
+    const now = Date.now();
+    timing[name] = now - timingStartedAt;
+    timingStartedAt = now;
+  };
   requireRole_(session, [ROLE.STUDENT, ROLE.ADMIN]);
   const studentId = resolveStudentId_(session, input.studentId, [ROLE.ADMIN]);
   const unitId = String(input.unitId || '');
   const roundNumber = normalizeRoundNumber_(input.roundNumber);
   const profile = getCachedStudentProfile_(studentId);
+  markTiming('profile');
   if (!profile) throw new Error('生徒情報が見つかりません。');
-  const selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+  let selectableUnits = getCachedStudentSelectableUnits_(studentId, profile.grade);
+  if (!selectableUnits) {
+    selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+    putCachedStudentSelectableUnits_(studentId, profile.grade, selectableUnits);
+  }
+  markTiming('units');
   const selectableIds = new Set(selectableUnits.map(unit => String(unit.unitId)));
   if (!selectableIds.has(unitId)) throw publicError_('選択できない単元です。', 'INVALID_PROGRESS_UNIT');
   const selectedUnit = selectableUnits.find(unit => String(unit.unitId) === unitId);
-  const targetRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
-  const targetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows);
+  let targetIds = getCachedStudentTargetIds_(studentId, profile.grade);
+  if (targetIds == null) {
+    const targetRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
+    targetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', targetRows);
+    putCachedStudentTargetIds_(studentId, profile.grade, targetIds);
+  }
+  markTiming('targets');
   const lctResult = unitHasLct_(selectedUnit) ? String(input.lctResult || '') : '';
   if (!['', 'PERFECT', 'PASS', 'REVIEW'].includes(lctResult)) {
     throw publicError_('LCTは◎・○・×から選択してください。', 'INVALID_LCT_RESULT');
   }
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('UnitProgress');
+  markTiming('lock');
   try {
     const rows = getRowsByFieldValue_('UnitProgress', 'studentId', studentId);
+    markTiming('progressRead');
     const current = rows.find(row =>
       String(row.studentId) === studentId &&
       String(row.unitId) === unitId &&
@@ -24878,10 +24990,13 @@ function saveStudentProgress_(session, input) {
     };
     if (current) updateObjectRowFast_('UnitProgress', current, next);
     else appendObjectsFast_('UnitProgress', [next]);
+    markTiming('progressWrite');
     const createdHomework = hasLessonProgress_(next)
       ? ensureHomeworkForLessonProgress_(studentId, unitId, roundNumber, SCHOOL_YEAR, today, true)
       : [];
+    markTiming('homework');
     appendAuditFast_(session, current ? 'UPDATE_PROGRESS' : 'CREATE_PROGRESS', 'UnitProgress', next.progressId, before, next);
+    markTiming('audit');
 
     const updatedRows = rows.filter(row =>
       String(row.studentId) === studentId && rowSchoolYear_(row) === SCHOOL_YEAR
@@ -24895,7 +25010,9 @@ function saveStudentProgress_(session, input) {
     const completedKeys = new Set(updatedRows.filter(row =>
       targetSet.has(String(row.unitId)) && isTrue_(row.tryCompleted)
     ).map(row => progressRoundKey_(row.unitId, rowRoundNumber_(row))));
-    const unitSubjectById = getCachedUnitSubjectMap_();
+    const unitSubjectById = Object.fromEntries(
+      selectableUnits.map(unit => [String(unit.unitId), String(unit.subject || '')])
+    );
     const subjectAggregates = ['英語','数学','国語','理科','社会'].map(subject => {
       const ids = targetIds.filter(id => unitSubjectById[id] === subject);
       const rounds = STUDY_ROUNDS.map(value => {
@@ -24910,12 +25027,14 @@ function saveStudentProgress_(session, input) {
       return {roundNumber: value, targetCount: targetIds.length, completedCount: done, progressRate: targetIds.length ? done / targetIds.length : null};
     });
     const completedCount = rounds.reduce((sum, item) => sum + item.completedCount, 0);
+    markTiming('aggregates');
     return {
       success: true,
       clientRevision: next.clientRevision,
       clientMutationId: next.clientMutationId,
       progress: next,
       createdHomework,
+      timing,
       aggregates: {
         overall: {
           targetCount: targetIds.length,
@@ -24927,7 +25046,7 @@ function saveStudentProgress_(session, input) {
       }
     };
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
 }
 
@@ -24991,8 +25110,7 @@ function saveVocabularyProgress_(session, input) {
     throw publicError_('日付を正しく入力してください。', 'INVALID_LEARNING_DATE');
   }
   const unitId = vocabularyUnitId_(level, direction);
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('UnitProgress');
   try {
     const rows = getRowsByFieldValue_('UnitProgress', 'studentId', studentId);
     const current = rows.find(row =>
@@ -25050,7 +25168,7 @@ function saveVocabularyProgress_(session, input) {
       createdHomework
     };
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
 }
 
@@ -25072,10 +25190,9 @@ function saveVocabularyTargets_(session, input) {
     });
   });
   if (!changes.size) throw publicError_('変更する範囲を選択してください。', 'TARGET_CHANGES_REQUIRED');
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('StudentTargets');
   try {
-    const rows = getRowsAsObjects_('StudentTargets');
+    const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const now = nowIso_();
     const currentByUnit = new Map(rows.filter(row =>
       String(row.studentId) === studentId &&
@@ -25110,7 +25227,11 @@ function saveVocabularyTargets_(session, input) {
     replacements.forEach((row, unitId) => {
       if (!currentByUnit.has(unitId)) finalRows.push(row);
     });
-    replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentTargets')) {
+      supabaseWriteRows_('StudentTargets', Array.from(replacements.values()));
+    } else {
+      replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    }
     const targetCount = finalRows.filter(row =>
       String(row.studentId) === studentId &&
       String(row.subject) === '英語' &&
@@ -25123,11 +25244,12 @@ function saveVocabularyTargets_(session, input) {
     });
     return {success: true, changedCount: changes.size, targetCount};
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
 }
 
 function setOwnTargetChanges_(session, input) {
+  const startedAt = Date.now();
   requireRole_(session, [ROLE.STUDENT]);
   const studentId = resolveStudentId_(session, input.studentId, [ROLE.ADMIN]);
   const subject = String(input.subject || '');
@@ -25136,11 +25258,17 @@ function setOwnTargetChanges_(session, input) {
     throw publicError_('科目を選択してください。', 'SUBJECT_REQUIRED');
   }
   const profile = getCachedStudentProfile_(studentId);
+  perfTrace_('targetSave.profile', startedAt, {studentId: maskedStudentId_(studentId)});
   if (!profile) throw new Error('生徒情報が見つかりません。');
-  const candidates = filterUnitsForProfile_(
-    profile,
-    getCachedSelectableUnits_(profile.grade, subject, series)
+  let selectableUnits = getCachedStudentSelectableUnits_(studentId, profile.grade);
+  if (!selectableUnits) {
+    selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+    putCachedStudentSelectableUnits_(studentId, profile.grade, selectableUnits);
+  }
+  const candidates = selectableUnits.filter(unit =>
+    String(unit.subject) === subject && normalizeSeries_(unit.series) === series
   );
+  perfTrace_('targetSave.candidates', startedAt, {rows: candidates.length});
   const candidateIds = new Set(candidates.map(unit => String(unit.unitId)));
   const deduped = new Map();
   (input.changes || []).forEach(change => deduped.set(String(change.unitId || ''), !!change.selected));
@@ -25148,10 +25276,10 @@ function setOwnTargetChanges_(session, input) {
     throw publicError_('選択できない単元が含まれています。', 'INVALID_TARGET_UNIT');
   }
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('StudentTargets');
   try {
-    const rows = getRowsAsObjects_('StudentTargets');
+    const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
+    perfTrace_('targetSave.currentRows', startedAt, {rows: rows.length});
     const now = nowIso_();
     const rowByUnit = new Map(rows
       .filter(row =>
@@ -25188,8 +25316,27 @@ function setOwnTargetChanges_(session, input) {
     replacements.forEach((row, unitId) => {
       if (!rowByUnit.has(unitId)) finalRows.push(row);
     });
-    replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
-    const targetCount = getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, finalRows).length;
+    if (typeof supabaseStorageEnabledFor_ === 'function' && supabaseStorageEnabledFor_('StudentTargets')) {
+      supabaseWriteRows_('StudentTargets', Array.from(replacements.values()));
+    } else {
+      replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
+    }
+    perfTrace_('targetSave.storageWrite', startedAt, {changedRows: replacements.size});
+    let allTargetIds = getCachedStudentTargetIds_(studentId, profile.grade);
+    if (allTargetIds == null) {
+      allTargetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', finalRows);
+    }
+    const allTargetSet = new Set(allTargetIds.map(String));
+    deduped.forEach((selected, unitId) =>
+      selected ? allTargetSet.add(unitId) : allTargetSet.delete(unitId)
+    );
+    const nextTargetIds = Array.from(allTargetSet);
+    putCachedStudentTargetIds_(studentId, profile.grade, nextTargetIds);
+    const targetCount = candidates.reduce(
+      (count, unit) => count + (allTargetSet.has(String(unit.unitId)) ? 1 : 0),
+      0
+    );
+    perfTrace_('targetSave.targetCount', startedAt, {targetCount});
     appendAuditFast_(
       session,
       'SET_OWN_TARGET_CHANGES',
@@ -25198,16 +25345,19 @@ function setOwnTargetChanges_(session, input) {
       null,
       {subject, series, changedCount: deduped.size, targetCount}
     );
+    perfTrace_('targetSave.audit', startedAt, {});
+    perfTrace_('targetSave.complete', startedAt, {changedRows: replacements.size});
     return {
       success: true,
       subject,
       series,
       changedCount: deduped.size,
       targetCount,
-      clientRevision: Number(input.clientRevision || 0)
+      clientRevision: Number(input.clientRevision || 0),
+      elapsedMs: Date.now() - startedAt
     };
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
 }
 
@@ -25378,10 +25528,9 @@ function setOwnTargetSelection_(session, input) {
   }
   const previousTargetCount = getStudentTargetUnitIds_(studentId, subject, series).length;
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  const lock = acquireStorageWriteLock_('StudentTargets');
   try {
-    const currentRows = getRowsAsObjects_('StudentTargets');
+    const currentRows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
     const currentByUnit = new Map(currentRows
       .filter(row =>
         String(row.studentId) === studentId &&
@@ -25423,7 +25572,7 @@ function setOwnTargetSelection_(session, input) {
       }
     );
   } finally {
-    lock.releaseLock();
+    releaseStorageWriteLock_(lock);
   }
   return {success: true, subject, targetCount: selectedIds.size};
 }
@@ -25433,7 +25582,7 @@ function setStudentTarget_(session, input) {
   const studentId = String(input.studentId || '');
   const unitId = String(input.unitId || '');
   const included = !!input.included;
-  const rows = getRowsAsObjects_('StudentTargets');
+  const rows = getRowsByFieldValue_('StudentTargets', 'studentId', studentId);
   const current = rows.find(row => String(row.studentId) === studentId && String(row.unitId) === unitId);
   const unit = getRowsAsObjects_('Units').find(row => String(row.unitId) === unitId);
   if (!unit) throw new Error('単元が見つかりません。');
