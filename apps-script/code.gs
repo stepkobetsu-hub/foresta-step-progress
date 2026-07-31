@@ -25242,9 +25242,13 @@ function setOwnTargetChanges_(session, input) {
   const profile = getCachedStudentProfile_(studentId);
   perfTrace_('targetSave.profile', startedAt, {studentId: maskedStudentId_(studentId)});
   if (!profile) throw new Error('生徒情報が見つかりません。');
-  const candidates = filterUnitsForProfile_(
-    profile,
-    getCachedSelectableUnits_(profile.grade, subject, series)
+  let selectableUnits = getCachedStudentSelectableUnits_(studentId, profile.grade);
+  if (!selectableUnits) {
+    selectableUnits = filterUnitsForProfile_(profile, getCachedSelectableUnits_(profile.grade));
+    putCachedStudentSelectableUnits_(studentId, profile.grade, selectableUnits);
+  }
+  const candidates = selectableUnits.filter(unit =>
+    String(unit.subject) === subject && normalizeSeries_(unit.series) === series
   );
   perfTrace_('targetSave.candidates', startedAt, {rows: candidates.length});
   const candidateIds = new Set(candidates.map(unit => String(unit.unitId)));
@@ -25300,11 +25304,19 @@ function setOwnTargetChanges_(session, input) {
       replaceAllObjectRowsFast_('StudentTargets', finalRows, rows.length);
     }
     perfTrace_('targetSave.storageWrite', startedAt, {changedRows: replacements.size});
-    const targetCount = getStudentTargetUnitIdsForProfile_(studentId, profile, subject, series, finalRows).length;
-    putCachedStudentTargetIds_(
-      studentId,
-      profile.grade,
-      getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', finalRows)
+    let allTargetIds = getCachedStudentTargetIds_(studentId, profile.grade);
+    if (allTargetIds == null) {
+      allTargetIds = getStudentTargetUnitIdsForProfile_(studentId, profile, '', '', finalRows);
+    }
+    const allTargetSet = new Set(allTargetIds.map(String));
+    deduped.forEach((selected, unitId) =>
+      selected ? allTargetSet.add(unitId) : allTargetSet.delete(unitId)
+    );
+    const nextTargetIds = Array.from(allTargetSet);
+    putCachedStudentTargetIds_(studentId, profile.grade, nextTargetIds);
+    const targetCount = candidates.reduce(
+      (count, unit) => count + (allTargetSet.has(String(unit.unitId)) ? 1 : 0),
+      0
     );
     perfTrace_('targetSave.targetCount', startedAt, {targetCount});
     appendAuditFast_(
