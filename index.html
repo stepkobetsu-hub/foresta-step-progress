@@ -672,18 +672,19 @@
     $('targetGrade').onchange=event=>{state.targetGrade=event.target.value;paintResults()};
     paintResults();
   }
-  let initialLoginType='student';try{const savedType=localStorage.getItem(REMEMBER_KEYS.type);if(savedType==='student'||savedType==='staff')initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);
+  let initialLoginType='student';try{const savedType=localStorage.getItem(REMEMBER_KEYS.type);if(!readCommonSession_()&&(savedType==='student'||savedType==='staff'))initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);
   (async()=>{
     let resumed=false;
-    let saved=readStoredSession_();
+    let saved=null;
     const common=readCommonSession_();
     try{
-      if((!saved||!saved.token)&&common){
+      if(common){
         const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:30000});
         if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');
         saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};
+        clearStoredSession_();
         saveStoredSession_(saved,false);
-      }
+      }else saved=readStoredSession_();
       if(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now())){
         state.token=saved.token;state.role=saved.role;state.profile=saved.profile;
         if(saved.role==='STUDENT'){state.studentPage='homework';state.studentLandingPending=true;loadStudentViewCache_()}
