@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 1.8 seconds
+Output:
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -262,6 +265,7 @@ type SyncQueueRow = {
   sync_id: string; student_id: string; operation_type: string; record_id: string;
   payload: string; request_id: string; attempt_count: number; status: string;
   google_status: string; google_version: number; google_updated_at: string | null;
+  lock_token: string | null; locked_at: string | null; batch_id: string | null;
 };
 
 const syncOperation = (entity: string, action: string) => {
@@ -276,23 +280,25 @@ const syncRecordState = (operationType: string, payload: Record<string, unknown>
   operationType === "HOMEWORK_ARCHIVE" ? "ARCHIVED" :
   operationType === "HOMEWORK_RESTORE" ? "ACTIVE" : String(payload.status || "ACTIVE");
 
-const postGoogle = async (env: Env, row: SyncQueueRow, expectedVersion: number) => {
+const postGoogleBatch = async (env: Env, batchId: string, rows: SyncQueueRow[]) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("GOOGLE_TIMEOUT"), 7_000);
+  const timeout = setTimeout(() => controller.abort("GOOGLE_TIMEOUT"), 30_000);
   try {
     const response = await fetch(env.GOOGLE_DUAL_WRITE_URL, {
       method: "POST",
       headers: { "content-type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
-        action: "write", token: env.GOOGLE_DUAL_WRITE_TOKEN, sync_id: row.sync_id,
-        student_id: row.student_id, operation_type: row.operation_type,
-        record_id: row.record_id, payload: JSON.parse(row.payload), request_id: row.request_id,
-        version: expectedVersion, record_state: syncRecordState(row.operation_type, JSON.parse(row.payload)),
+        action: "batchWrite", token: env.GOOGLE_DUAL_WRITE_TOKEN, batchId,
+        operations: rows.map((row) => ({
+          syncId: row.sync_id, studentId: row.student_id, operationType: row.operation_type,
+          recordId: row.record_id, payload: JSON.parse(row.payload), requestId: row.request_id,
+          recordState: syncRecordState(row.operation_type, JSON.parse(row.payload)),
+        })),
       }),
       signal: controller.signal,
     });
     const result: unknown = await response.json();
-    if (!isRecord(result) || result.success !== true) {
+    if (!isRecord(result) || !Array.isArray(result.results)) {
       const code = isRecord(result) ? String(result.code || "GOOGLE_REJECTED") : "GOOGLE_INVALID_RESPONSE";
       throw new Error(code);
     }
@@ -300,36 +306,61 @@ const postGoogle = async (env: Env, row: SyncQueueRow, expectedVersion: number) 
   } finally { clearTimeout(timeout); }
 };
 
-const latestGoogleVersion = async (env: Env, row: SyncQueueRow) => {
-  const latest = await env.DB.prepare(
-    "SELECT google_version FROM sync_queue WHERE student_id=? AND operation_type=? AND record_id=? AND google_status='SAVED' AND request_id<>? ORDER BY google_version DESC LIMIT 1"
-  ).bind(row.student_id, row.operation_type, row.record_id, row.request_id).first<{google_version:number}>();
-  return Number(latest?.google_version || 0);
+type GoogleBatchResult = { requestId?: unknown; ok?: unknown; version?: unknown; updatedAt?: unknown; error?: unknown };
+
+const claimBatch = async (env: Env) => {
+  await env.DB.prepare("UPDATE sync_queue SET status='RETRY_WAIT', lock_token=NULL, locked_at=NULL, batch_id=NULL, updated_at=datetime('now') WHERE status='PROCESSING' AND locked_at<datetime('now','-2 minutes')").run();
+  const limit = Math.max(1, Math.min(25, Number(env.SYNC_BATCH_SIZE || 25)));
+  const candidates = await env.DB.prepare("SELECT * FROM sync_queue WHERE status IN ('PENDING','RETRY_WAIT') AND attempt_count<3 AND (next_retry_at IS NULL OR next_retry_at<=datetime('now')) ORDER BY rowid LIMIT ?").bind(limit).all<SyncQueueRow>();
+  if (!candidates.results.length) return null;
+  const lockToken = crypto.randomUUID();
+  const batchId = crypto.randomUUID();
+  await env.DB.batch(candidates.results.map((row) => env.DB.prepare("UPDATE sync_queue SET status='PROCESSING',lock_token=?,locked_at=datetime('now'),batch_id=?,updated_at=datetime('now') WHERE sync_id=? AND status IN ('PENDING','RETRY_WAIT')").bind(lockToken,batchId,row.sync_id)));
+  const claimed = await env.DB.prepare("SELECT * FROM sync_queue WHERE lock_token=? ORDER BY rowid").bind(lockToken).all<SyncQueueRow>();
+  if (!claimed.results.length) return null;
+  await env.DB.prepare("INSERT INTO sync_batches(batch_id,item_count) VALUES(?,?)").bind(batchId,claimed.results.length).run();
+  return { batchId, rows: claimed.results };
 };
 
-const processSyncRow = async (env: Env, row: SyncQueueRow) => {
-  const predecessor = await env.DB.prepare("SELECT 1 AS pending FROM sync_queue WHERE student_id=? AND operation_type=? AND record_id=? AND status<>'SAVED' AND rowid<(SELECT rowid FROM sync_queue WHERE sync_id=?) LIMIT 1")
-    .bind(row.student_id, row.operation_type, row.record_id, row.sync_id).first();
-  if (predecessor) return { ok: false, status: "WAITING_FOR_PREDECESSOR" };
-  const claimed = await env.DB.prepare("UPDATE sync_queue SET status='PROCESSING', updated_at=datetime('now') WHERE sync_id=? AND status='PENDING' AND attempt_count<3")
-    .bind(row.sync_id).run();
-  if (claimed.meta.changes !== 1) return { ok: false, status: "ALREADY_PROCESSING" };
-  const expectedVersion = await latestGoogleVersion(env, row);
-  const attempt = Number(row.attempt_count || 0) + 1;
-  const startedAt = performance.now();
-  try {
-    const google = await postGoogle(env, row, expectedVersion);
-    const googleMs = Number((performance.now() - startedAt).toFixed(3));
-    await env.DB.prepare("UPDATE sync_queue SET attempt_count=?, last_error='', next_retry_at=NULL, status='SAVED', google_status='SAVED', google_version=?, google_updated_at=?, updated_at=datetime('now') WHERE sync_id=?")
-      .bind(attempt, Number(google.version || expectedVersion + 1), String(google.updated_at || new Date().toISOString()), row.sync_id).run();
-    return { ok: true, status: "SAVED", google, googleMs, attemptCount: attempt };
-  } catch (error) {
-    const lastError = error instanceof Error ? error.message : "GOOGLE_SYNC_ERROR";
+const failBatch = async (env: Env, batchId: string, rows: SyncQueueRow[], message: string, elapsed: number) => {
+  await env.DB.batch(rows.map((row) => {
+    const attempt = Number(row.attempt_count || 0) + 1;
     const terminal = attempt >= 3;
-    const nextSeconds = 2 ** attempt;
-    await env.DB.prepare("UPDATE sync_queue SET attempt_count=?, last_error=?, next_retry_at=datetime('now', ?), status=?, google_status='ERROR', updated_at=datetime('now') WHERE sync_id=?")
-      .bind(attempt, lastError.slice(0, 500), \`+\${nextSeconds} seconds\`, terminal ? "SYNC_ERROR" : "PENDING", row.sync_id).run();
-    return { ok: false, status: terminal ? "CLOUDFLARE_ONLY" : "SYNCING", error: lastError, attemptCount: attempt };
+    return env.DB.prepare("UPDATE sync_queue SET attempt_count=?,last_error=?,next_retry_at=datetime('now',?),status=?,google_status='ERROR',lock_token=NULL,locked_at=NULL,sync_duration_ms=?,updated_at=datetime('now') WHERE sync_id=?")
+      .bind(attempt,message.slice(0,500),`+${2 ** attempt} seconds`,terminal ? "FAILED" : "RETRY_WAIT",elapsed,row.sync_id);
+  }));
+  await env.DB.prepare("UPDATE sync_batches SET failed_count=?,duration_ms=?,status='FAILED',last_error=?,completed_at=datetime('now') WHERE batch_id=?").bind(rows.length,elapsed,message.slice(0,500),batchId).run();
+};
+
+const processOneBatch = async (env: Env) => {
+  const claimed = await claimBatch(env);
+  if (!claimed) return 0;
+  const started = performance.now();
+  try {
+    const google = await postGoogleBatch(env, claimed.batchId, claimed.rows);
+    const elapsed = Number((performance.now()-started).toFixed(3));
+    const results = (google.results as GoogleBatchResult[]);
+    const byRequest = new Map(results.map((result) => [String(result.requestId || ""),result]));
+    let saved = 0; let failed = 0;
+    await env.DB.batch(claimed.rows.map((row) => {
+      const result = byRequest.get(row.request_id);
+      const attempt = Number(row.attempt_count || 0)+1;
+      if (result?.ok === true) {
+        saved += 1;
+        return env.DB.prepare("UPDATE sync_queue SET attempt_count=?,last_error='',next_retry_at=NULL,status='SAVED',google_status='SAVED',google_version=?,google_updated_at=?,lock_token=NULL,locked_at=NULL,sync_duration_ms=(julianday('now')-julianday(created_at))*86400000,reconciliation_status='MATCHED',updated_at=datetime('now') WHERE sync_id=?")
+          .bind(attempt,Number(result.version || 0),String(result.updatedAt || new Date().toISOString()),row.sync_id);
+      }
+      failed += 1;
+      const terminal=attempt>=3;
+      return env.DB.prepare("UPDATE sync_queue SET attempt_count=?,last_error=?,next_retry_at=datetime('now',?),status=?,google_status='ERROR',lock_token=NULL,locked_at=NULL,sync_duration_ms=(julianday('now')-julianday(created_at))*86400000,reconciliation_status='ERROR',updated_at=datetime('now') WHERE sync_id=?")
+        .bind(attempt,String(result?.error || "MISSING_BATCH_RESULT").slice(0,500),`+${2 ** attempt} seconds`,terminal?"FAILED":"RETRY_WAIT",row.sync_id);
+    }));
+    await env.DB.prepare("UPDATE sync_batches SET saved_count=?,failed_count=?,apps_script_ms=?,duration_ms=?,status=?,completed_at=datetime('now') WHERE batch_id=?").bind(saved,failed,elapsed,elapsed,failed?"PARTIAL":"SAVED",claimed.batchId).run();
+    return claimed.rows.length;
+  } catch (error) {
+    const elapsed=Number((performance.now()-started).toFixed(3));
+    await failBatch(env,claimed.batchId,claimed.rows,error instanceof Error?error.message:"GOOGLE_SYNC_ERROR",elapsed);
+    return claimed.rows.length;
   }
 };
 
@@ -347,8 +378,7 @@ const dualWrite = async (request: { json<T>(): Promise<T> }, response: Response,
   const row = await env.DB.prepare("SELECT * FROM sync_queue WHERE request_id=?").bind(requestId).first<SyncQueueRow>();
   if (!row) return json({ ...responseBody, sync: { status: "SYNC_ERROR", error: "QUEUE_INSERT_FAILED" } }, 207);
   if (row.status === "SAVED") return json({ ...responseBody, sync: { syncId: row.sync_id, status: "SAVED", replayed: true } });
-  ctx.waitUntil(processSyncRow(env, row));
-  return json({ ...responseBody, sync: { syncId: row.sync_id, status: "SYNCING", cloudflareStatus: "SAVED", googleStatus: row.google_status } }, 202);
+  return json({ ...responseBody, sync: { syncId: row.sync_id, status: "BACKUP_PENDING", cloudflareStatus: "SAVED", googleStatus: row.google_status } }, 202);
 };
 
 const handleSyncStatus = async (env: Env, syncId: string) => {
@@ -359,8 +389,14 @@ const handleSyncStatus = async (env: Env, syncId: string) => {
 
 const runDueSyncs = async (env: Env) => {
   if (String(env.DUAL_WRITE_ENABLED) !== "true") return;
-  const due = await env.DB.prepare("SELECT * FROM sync_queue WHERE status='PENDING' AND attempt_count<3 AND (next_retry_at IS NULL OR next_retry_at<=datetime('now')) ORDER BY created_at LIMIT 10").all<SyncQueueRow>();
-  for (const row of due.results) await processSyncRow(env, row);
+  for (let batch=0;batch<2;batch+=1) if ((await processOneBatch(env))===0) break;
+};
+
+const handleSyncMetrics = async (env: Env) => {
+  const row = await env.DB.prepare("SELECT SUM(CASE WHEN status IN ('PENDING','RETRY_WAIT') THEN 1 ELSE 0 END) pending_count,SUM(CASE WHEN status='PROCESSING' THEN 1 ELSE 0 END) processing_count,SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed_count,MIN(CASE WHEN status IN ('PENDING','RETRY_WAIT','PROCESSING') THEN created_at END) oldest_unsynced_at,MAX(CASE WHEN status='SAVED' THEN updated_at END) last_success_at,AVG(CASE WHEN status='SAVED' THEN sync_duration_ms END) avg_sync_ms,MAX(CASE WHEN status='SAVED' THEN sync_duration_ms END) max_sync_ms FROM sync_queue").first<Record<string,unknown>>();
+  const pending=Number(row?.pending_count||0); const oldest=String(row?.oldest_unsynced_at||"");
+  const oldestMinutes=oldest ? (Date.now()-Date.parse(oldest.replace(" ","T")+"Z"))/60000 : 0;
+  return json({ ...row, warning: pending>=10 || oldestMinutes>=10, warningReasons:[pending>=10?"PENDING_10_OR_MORE":null,oldestMinutes>=10?"OLDEST_10_MINUTES_OR_MORE":null].filter(Boolean) });
 };
 
 export default {
@@ -372,7 +408,7 @@ export default {
         return json({
           ok: !disabled(env),
           service: "step-progress-api",
-          mode: "phase4-limited-dual-write",
+          mode: "phase4.5-batched-google-backup",
           productionWriteApproved: String(env.PRODUCTION_WRITE_APPROVED) === "true",
           testWriteApproved: String(env.TEST_WRITE_APPROVED) === "true",
           dualWriteEnabled: String(env.DUAL_WRITE_ENABLED) === "true",
@@ -381,6 +417,8 @@ export default {
       }
       if (disabled(env)) return json({ error: "SERVICE_DISABLED" }, 503);
       if (!(await measured(trace, "auth", () => authorize(request, env)))) return withTrace(json({ error: "UNAUTHORIZED" }, 401), trace);
+
+      if (request.method === "GET" && url.pathname === "/admin/sync/status") return withTrace(await handleSyncMetrics(env), trace);
 
       const syncMatch = url.pathname.match(/^\/sync\/([^/]+)$/);
       if (request.method === "GET" && syncMatch) return withTrace(await handleSyncStatus(env, decodeURIComponent(syncMatch[1])), trace);
