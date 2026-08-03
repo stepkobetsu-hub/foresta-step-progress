@@ -1,0 +1,115 @@
+Exit code: 0
+Wall time: 1.1 seconds
+Output:
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cloudflare迚・蟄ｦ鄙帝ｲ謐礼ｮ｡逅・ｼ育ｬｬ3谿ｵ髫趣ｼ・/title>
+  <style>
+    :root{font-family:Inter,"Noto Sans JP",system-ui,sans-serif;color:#172033;background:#f4f7fb}
+    *{box-sizing:border-box}body{margin:0}header{background:#111827;color:white;padding:18px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
+    header h1{font-size:20px;margin:0}header small{color:#cbd5e1}.safe{background:#123c2d;color:#a7f3d0;padding:8px 12px;border-radius:999px;font-size:12px}
+    main{max-width:1100px;margin:auto;padding:24px}.card{background:white;border:1px solid #dce3ee;border-radius:14px;padding:18px;margin-bottom:16px;box-shadow:0 8px 30px #23314d0a}
+    .auth{display:grid;grid-template-columns:1fr auto;gap:10px}.auth input,.date{border:1px solid #b9c4d4;border-radius:9px;padding:10px;font:inherit}
+    button{border:0;border-radius:9px;padding:9px 13px;font-weight:700;cursor:pointer;background:#2563eb;color:white}button.secondary{background:#e8eef8;color:#253451}button.danger{background:#b42318}button:disabled{opacity:.55;cursor:not-allowed}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}.metric{padding:14px;border-radius:12px;background:#f5f8fc}.metric b{display:block;font-size:26px;margin-top:6px}
+    h2{font-size:17px;margin:0 0 14px}.row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid #edf1f6}.row:first-of-type{border-top:0}
+    .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.status{font-size:12px;border-radius:999px;padding:5px 9px;background:#edf2f8;color:#43516a}.status.saving{background:#fff5cc;color:#7a5100}.status.saved{background:#dff8e9;color:#11653b}.status.failed{background:#ffe4e1;color:#9d241b}.status.conflict{background:#f5e7ff;color:#6c2aa3}
+    .muted{color:#64748b;font-size:13px}.error{color:#b42318}.hidden{display:none}.tabs{display:flex;gap:8px;margin-bottom:12px}.tabs button{background:#e8eef8;color:#253451}.tabs button.active{background:#2563eb;color:white}
+    label.check{display:flex;gap:8px;align-items:center}.pill{font-size:12px;background:#eef2ff;color:#4338ca;padding:4px 8px;border-radius:999px}
+    @media(max-width:650px){header{align-items:flex-start;flex-direction:column}.auth{grid-template-columns:1fr}.row{grid-template-columns:1fr}.controls{justify-content:flex-start}}
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Cloudflare迚・蟄ｦ鄙帝ｲ謐礼ｮ｡逅・/h1><small>隨ｬ3谿ｵ髫弱・繝・せ繝育函蠕但蟆ら畑</small></div>
+  <div class="safe">譛ｬ逡ｪ菫晏ｭ・OFF ・・繝・せ繝井ｿ晏ｭ・ON</div>
+</header>
+<main>
+  <section class="card">
+    <h2>謗･邯・/h2>
+    <div class="auth"><input id="token" type="password" autocomplete="off" placeholder="豈碑ｼ・・讀懆ｨｼ逕ｨ繧｢繧ｯ繧ｻ繧ｹ繝医・繧ｯ繝ｳ"><button id="load">繝・せ繝育函蠕但繧定｡ｨ遉ｺ</button></div>
+    <p class="muted">繝医・繧ｯ繝ｳ縺ｯ縺薙・逕ｻ髱｢縺ｮ繝｡繝｢繝ｪ蜀・□縺代〒菴ｿ逕ｨ縺励∽ｿ晏ｭ倥＠縺ｾ縺帙ｓ縲・/p>
+    <p id="globalStatus" class="muted">譛ｪ謗･邯・/p>
+  </section>
+  <div id="app" class="hidden">
+    <section class="card"><h2 id="studentName">窶・/h2><div class="grid">
+      <div class="metric">謨呎攝<b id="materialCount">0</b></div><div class="metric">逶ｮ讓吝腰蜈・b id="targetCount">0</b></div>
+      <div class="metric">螳御ｺ・b id="completedCount">0</b></div><div class="metric">騾ｲ謐礼紫<b id="progressRate">0%</b></div>
+    </div></section>
+    <div class="tabs"><button data-tab="progress" class="active">騾ｲ謐・/button><button data-tab="homework">螳ｿ鬘・/button><button data-tab="targets">逶ｮ讓咏ｯ・峇</button></div>
+    <section id="progressPanel" class="card"><h2>騾ｲ謐嶺ｿ晏ｭ・/h2><div id="progressRows"></div></section>
+    <section id="homeworkPanel" class="card hidden"><h2>螳ｿ鬘梧律莉倥・繧｢繝ｼ繧ｫ繧､繝・/h2><div id="homeworkRows"></div></section>
+    <section id="targetsPanel" class="card hidden"><h2>逶ｮ讓咏ｯ・峇</h2><div id="targetRows"></div></section>
+  </div>
+</main>
+<script>
+(() => {
+  const STUDENT_ID="TEST-STUDENT-01";
+  const state={token:"",data:null,pending:new Map(),failed:new Map()};
+  const $=id=>document.getElementById(id);
+  const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+  const requestId=()=>crypto.randomUUID().replaceAll("-","_");
+  const api=async(path,options={})=>{
+    const started=performance.now();
+    const response=await fetch(path,{...options,headers:{"content-type":"application/json",authorization:"Bearer "+state.token,...options.headers}});
+    const data=await response.json();
+    if(!response.ok){const error=new Error(data.error||"菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆");error.status=response.status;error.data=data;throw error}
+    return {data,elapsedMs:performance.now()-started};
+  };
+  const setGlobal=(text,error=false)=>{$("globalStatus").textContent=text;$("globalStatus").className=error?"error":"muted"};
+  const badge=(id,text,kind="")=>{const el=document.querySelector('[data-status="'+CSS.escape(id)+'"]');if(el){el.textContent=text;el.className="status "+kind}};
+  const updateSummary=()=>{
+    const targets=state.data.targets.filter(x=>Number(x.included)===1),done=state.data.progress.filter(x=>Number(x.try_completed)===1).length;
+    $("targetCount").textContent=targets.length;$("completedCount").textContent=done;$("progressRate").textContent=targets.length?Math.round(done/targets.length*100)+"%":"窶・;
+  };
+  const saveOptimistic=async({key,path,method,body,apply,rollback,merge})=>{
+    const id=requestId(),started=performance.now();apply();badge(key,"菫晏ｭ倅ｸｭ","saving");
+    try{
+      const {data,elapsedMs}=await api(path,{method,body:JSON.stringify({...body,requestId:id})});
+      merge(data);state.failed.delete(key);badge(key,"菫晏ｭ俶ｸ医∩ "+Math.round(elapsedMs)+"ms","saved");return {elapsedMs,uiMs:performance.now()-started,data};
+    }catch(error){
+      rollback();
+      const retry=()=>saveOptimistic({key,path,method,body:{...body,expectedVersion:error.status===409&&error.data.current?error.data.current.version:body.expectedVersion},apply,rollback,merge});
+      state.failed.set(key,retry);
+      badge(key,error.status===409?"遶ｶ蜷茨ｼ壼・隱ｭ霎ｼ縺励※縺上□縺輔＞":"螟ｱ謨励・蜀崎ｩｦ陦・,"failed");
+      renderRetry(key);throw error;
+    }
+  };
+  const renderRetry=key=>{const box=document.querySelector('[data-controls="'+CSS.escape(key)+'"]');if(box&&!box.querySelector(".retry")){const b=document.createElement("button");b.className="secondary retry";b.textContent="蜀崎ｩｦ陦・;b.onclick=()=>state.failed.get(key)?.();box.appendChild(b)}};
+  const render=()=>{
+    const d=state.data;$("app").classList.remove("hidden");$("studentName").textContent=d.student.display_name+"・・+d.student.grade+"・・+d.student.campus+"・・;
+    $("materialCount").textContent=d.materials.length;updateSummary();
+    $("progressRows").innerHTML=d.progress.map(p=>{const key="p-"+p.record_id;return '<div class="row"><div><b>'+esc(p.unit_title)+'</b><div class="muted">'+esc(p.subject)+'繝ｻ'+p.round+'蜻ｨ逶ｮ</div></div><div class="controls" data-controls="'+key+'"><label class="check"><input type="checkbox" data-progress="'+esc(p.record_id)+'" '+(Number(p.try_completed)?"checked":"")+'> TRY螳御ｺ・/label><span class="status" data-status="'+key+'">蠕・ｩ滉ｸｭ</span></div></div>'}).join("");
+    $("homeworkRows").innerHTML=d.homework.map(h=>{const key="h-"+h.homework_id;return '<div class="row"><div><b>'+esc(h.unit_title)+'</b><div class="muted">'+esc(h.status)+'</div></div><div class="controls" data-controls="'+key+'"><input class="date" type="date" data-date="'+esc(h.homework_id)+'" value="'+esc(h.due_date||"")+'"><button class="secondary" data-save-date="'+esc(h.homework_id)+'">譌･莉倅ｿ晏ｭ・/button><button class="'+(h.archived_at?"secondary":"danger")+'" data-archive="'+esc(h.homework_id)+'">'+(h.archived_at?"蠕ｩ豢ｻ":"繧｢繝ｼ繧ｫ繧､繝・)+'</button><span class="status" data-status="'+key+'">蠕・ｩ滉ｸｭ</span></div></div>'}).join("");
+    $("targetRows").innerHTML=d.targets.map(t=>{const key="t-"+t.target_id;return '<div class="row"><div><b>'+esc(t.unit_title)+'</b><div class="muted">'+esc(t.subject)+' <span class="pill">'+esc(t.unit_type)+'</span></div></div><div class="controls" data-controls="'+key+'"><label class="check"><input type="checkbox" data-target="'+esc(t.target_id)+'" '+(Number(t.included)?"checked":"")+'> 逶ｮ讓吶↓蜷ｫ繧√ｋ</label><span class="status" data-status="'+key+'">蠕・ｩ滉ｸｭ</span></div></div>'}).join("");
+    bind();
+  };
+  const bind=()=>{
+    document.querySelectorAll("[data-progress]").forEach(input=>input.onchange=async()=>{
+      const p=state.data.progress.find(x=>x.record_id===input.dataset.progress),before=p.try_completed,after=input.checked?1:0,key="p-"+p.record_id;
+      try{await saveOptimistic({key,path:"/students/"+STUDENT_ID+"/progress/"+encodeURIComponent(p.record_id),method:"PATCH",body:{expectedVersion:p.version,tryCompleted:Boolean(after)},apply:()=>{p.try_completed=after;updateSummary()},rollback:()=>{p.try_completed=before;input.checked=Boolean(before);updateSummary()},merge:r=>Object.assign(p,r.progress)})}catch(error){setGlobal(error.status===409?"遶ｶ蜷医ｒ讀懃衍縺励∪縺励◆縲ょ・隱ｭ霎ｼ縺励※縺上□縺輔＞縲・:"騾ｲ謐嶺ｿ晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
+    });
+    document.querySelectorAll("[data-save-date]").forEach(button=>button.onclick=async()=>{
+      const h=state.data.homework.find(x=>x.homework_id===button.dataset.saveDate),input=document.querySelector('[data-date="'+CSS.escape(h.homework_id)+'"]'),before=h.due_date,after=input.value||null,key="h-"+h.homework_id;
+      try{await saveOptimistic({key,path:"/students/"+STUDENT_ID+"/homework/"+encodeURIComponent(h.homework_id)+"/dates",method:"PATCH",body:{expectedVersion:h.version,dueDate:after},apply:()=>{h.due_date=after},rollback:()=>{h.due_date=before;input.value=before||""},merge:r=>Object.assign(h,r.homework)})}catch(error){setGlobal("螳ｿ鬘梧律莉倥・菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
+    });
+    document.querySelectorAll("[data-archive]").forEach(button=>button.onclick=async()=>{
+      const h=state.data.homework.find(x=>x.homework_id===button.dataset.archive),before={archived_at:h.archived_at,restored_at:h.restored_at},restore=Boolean(h.archived_at),key="h-"+h.homework_id;
+      try{await saveOptimistic({key,path:"/students/"+STUDENT_ID+"/homework/"+encodeURIComponent(h.homework_id)+"/"+(restore?"restore":"archive"),method:"POST",body:{expectedVersion:h.version},apply:()=>{h.archived_at=restore?null:new Date().toISOString();button.textContent=restore?"繧｢繝ｼ繧ｫ繧､繝・:"蠕ｩ豢ｻ"},rollback:()=>{Object.assign(h,before);button.textContent=restore?"蠕ｩ豢ｻ":"繧｢繝ｼ繧ｫ繧､繝・},merge:r=>{Object.assign(h,r.homework);render()}})}catch(error){setGlobal("繧｢繝ｼ繧ｫ繧､繝匁桃菴懊↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
+    });
+    document.querySelectorAll("[data-target]").forEach(input=>input.onchange=async()=>{
+      const t=state.data.targets.find(x=>x.target_id===input.dataset.target),before=t.included,after=input.checked?1:0,key="t-"+t.target_id;
+      try{await saveOptimistic({key,path:"/students/"+STUDENT_ID+"/targets/"+encodeURIComponent(t.target_id),method:"PATCH",body:{expectedVersion:t.version,included:Boolean(after)},apply:()=>{t.included=after;updateSummary()},rollback:()=>{t.included=before;input.checked=Boolean(before);updateSummary()},merge:r=>Object.assign(t,r.target)})}catch(error){setGlobal("逶ｮ讓咏ｯ・峇縺ｮ菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
+    });
+  };
+  $("load").onclick=async()=>{state.token=$("token").value.trim();if(!state.token)return setGlobal("繧｢繧ｯ繧ｻ繧ｹ繝医・繧ｯ繝ｳ繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・,true);setGlobal("隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ窶ｦ");try{const {data,elapsedMs}=await api("/students/"+STUDENT_ID);state.data=data;render();setGlobal("隱ｭ霎ｼ貂医∩ "+Math.round(elapsedMs)+"ms")}catch(error){setGlobal("隱ｭ縺ｿ霎ｼ縺ｿ縺ｫ螟ｱ謨励＠縺ｾ縺励◆縲・,true)}};
+  document.querySelectorAll("[data-tab]").forEach(button=>button.onclick=()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("active",x===button));["progress","homework","targets"].forEach(name=>$(name+"Panel").classList.toggle("hidden",name!==button.dataset.tab))});
+})();
+</script>
+</body>
+</html>
+
+
