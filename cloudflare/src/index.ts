@@ -258,8 +258,113 @@ const handleRead = async (env: Env, studentId: string, resource: Resource | "sum
   return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.durationMs }, source: "cloudflare-d1-phase3-test-write" });
 };
 
+type SyncQueueRow = {
+  sync_id: string; student_id: string; operation_type: string; record_id: string;
+  payload: string; request_id: string; attempt_count: number; status: string;
+  google_status: string; google_version: number; google_updated_at: string | null;
+};
+
+const syncOperation = (entity: string, action: string) => {
+  if (entity === "progress") return "PROGRESS_SAVE";
+  if (entity === "targets") return "TARGET_RANGE_SAVE";
+  if (action === "dates") return "HOMEWORK_DATE_SAVE";
+  if (action === "archive") return "HOMEWORK_ARCHIVE";
+  return "HOMEWORK_RESTORE";
+};
+
+const syncRecordState = (operationType: string, payload: Record<string, unknown>) =>
+  operationType === "HOMEWORK_ARCHIVE" ? "ARCHIVED" :
+  operationType === "HOMEWORK_RESTORE" ? "ACTIVE" : String(payload.status || "ACTIVE");
+
+const postGoogle = async (env: Env, row: SyncQueueRow, expectedVersion: number) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("GOOGLE_TIMEOUT"), 7_000);
+  try {
+    const response = await fetch(env.GOOGLE_DUAL_WRITE_URL, {
+      method: "POST",
+      headers: { "content-type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "write", token: env.GOOGLE_DUAL_WRITE_TOKEN, sync_id: row.sync_id,
+        student_id: row.student_id, operation_type: row.operation_type,
+        record_id: row.record_id, payload: JSON.parse(row.payload), request_id: row.request_id,
+        version: expectedVersion, record_state: syncRecordState(row.operation_type, JSON.parse(row.payload)),
+      }),
+      signal: controller.signal,
+    });
+    const result: unknown = await response.json();
+    if (!isRecord(result) || result.success !== true) {
+      const code = isRecord(result) ? String(result.code || "GOOGLE_REJECTED") : "GOOGLE_INVALID_RESPONSE";
+      throw new Error(code);
+    }
+    return result;
+  } finally { clearTimeout(timeout); }
+};
+
+const latestGoogleVersion = async (env: Env, row: SyncQueueRow) => {
+  const latest = await env.DB.prepare(
+    "SELECT google_version FROM sync_queue WHERE student_id=? AND operation_type=? AND record_id=? AND google_status='SAVED' AND request_id<>? ORDER BY google_version DESC LIMIT 1"
+  ).bind(row.student_id, row.operation_type, row.record_id, row.request_id).first<{google_version:number}>();
+  return Number(latest?.google_version || 0);
+};
+
+const processSyncRow = async (env: Env, row: SyncQueueRow) => {
+  const predecessor = await env.DB.prepare("SELECT 1 AS pending FROM sync_queue WHERE student_id=? AND operation_type=? AND record_id=? AND status<>'SAVED' AND rowid<(SELECT rowid FROM sync_queue WHERE sync_id=?) LIMIT 1")
+    .bind(row.student_id, row.operation_type, row.record_id, row.sync_id).first();
+  if (predecessor) return { ok: false, status: "WAITING_FOR_PREDECESSOR" };
+  const claimed = await env.DB.prepare("UPDATE sync_queue SET status='PROCESSING', updated_at=datetime('now') WHERE sync_id=? AND status='PENDING' AND attempt_count<3")
+    .bind(row.sync_id).run();
+  if (claimed.meta.changes !== 1) return { ok: false, status: "ALREADY_PROCESSING" };
+  const expectedVersion = await latestGoogleVersion(env, row);
+  const attempt = Number(row.attempt_count || 0) + 1;
+  const startedAt = performance.now();
+  try {
+    const google = await postGoogle(env, row, expectedVersion);
+    const googleMs = Number((performance.now() - startedAt).toFixed(3));
+    await env.DB.prepare("UPDATE sync_queue SET attempt_count=?, last_error='', next_retry_at=NULL, status='SAVED', google_status='SAVED', google_version=?, google_updated_at=?, updated_at=datetime('now') WHERE sync_id=?")
+      .bind(attempt, Number(google.version || expectedVersion + 1), String(google.updated_at || new Date().toISOString()), row.sync_id).run();
+    return { ok: true, status: "SAVED", google, googleMs, attemptCount: attempt };
+  } catch (error) {
+    const lastError = error instanceof Error ? error.message : "GOOGLE_SYNC_ERROR";
+    const terminal = attempt >= 3;
+    const nextSeconds = 2 ** attempt;
+    await env.DB.prepare("UPDATE sync_queue SET attempt_count=?, last_error=?, next_retry_at=datetime('now', ?), status=?, google_status='ERROR', updated_at=datetime('now') WHERE sync_id=?")
+      .bind(attempt, lastError.slice(0, 500), \`+\${nextSeconds} seconds\`, terminal ? "SYNC_ERROR" : "PENDING", row.sync_id).run();
+    return { ok: false, status: terminal ? "CLOUDFLARE_ONLY" : "SYNCING", error: lastError, attemptCount: attempt };
+  }
+};
+
+const dualWrite = async (request: { json<T>(): Promise<T> }, response: Response, env: Env, ctx: ExecutionContext, studentId: string, entity: string, entityId: string, action: string, trace: Trace) => {
+  if (!response.ok || String(env.DUAL_WRITE_ENABLED) !== "true") return response;
+  const [requestBody, responseBody] = await Promise.all([request.json<Record<string, unknown>>(), response.clone().json<Record<string, unknown>>()]);
+  const requestId = String(requestBody.requestId || "");
+  const payload = (responseBody.progress || responseBody.homework || responseBody.target) as Record<string, unknown> | undefined;
+  if (!requestId || !payload) return response;
+  const operationType = syncOperation(entity, action);
+  const syncId = crypto.randomUUID();
+  await measured(trace, "syncQueue", async () => env.DB.prepare(
+    "INSERT OR IGNORE INTO sync_queue (sync_id,student_id,operation_type,record_id,payload,request_id,status,cloudflare_status,google_status) VALUES (?,?,?,?,?,?,'PENDING','SAVED','PENDING')"
+  ).bind(syncId, studentId, operationType, entityId, JSON.stringify(payload), requestId).run());
+  const row = await env.DB.prepare("SELECT * FROM sync_queue WHERE request_id=?").bind(requestId).first<SyncQueueRow>();
+  if (!row) return json({ ...responseBody, sync: { status: "SYNC_ERROR", error: "QUEUE_INSERT_FAILED" } }, 207);
+  if (row.status === "SAVED") return json({ ...responseBody, sync: { syncId: row.sync_id, status: "SAVED", replayed: true } });
+  ctx.waitUntil(processSyncRow(env, row));
+  return json({ ...responseBody, sync: { syncId: row.sync_id, status: "SYNCING", cloudflareStatus: "SAVED", googleStatus: row.google_status } }, 202);
+};
+
+const handleSyncStatus = async (env: Env, syncId: string) => {
+  const row = await env.DB.prepare("SELECT sync_id,student_id,operation_type,record_id,request_id,attempt_count,last_error,status,cloudflare_status,google_status,google_version,google_updated_at,created_at,updated_at FROM sync_queue WHERE sync_id=?")
+    .bind(syncId).first();
+  return row ? json({ sync: row }) : json({ error: "SYNC_NOT_FOUND" }, 404);
+};
+
+const runDueSyncs = async (env: Env) => {
+  if (String(env.DUAL_WRITE_ENABLED) !== "true") return;
+  const due = await env.DB.prepare("SELECT * FROM sync_queue WHERE status='PENDING' AND attempt_count<3 AND (next_retry_at IS NULL OR next_retry_at<=datetime('now')) ORDER BY created_at LIMIT 10").all<SyncQueueRow>();
+  for (const row of due.results) await processSyncRow(env, row);
+};
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const trace = createTrace();
     try {
@@ -267,14 +372,18 @@ export default {
         return json({
           ok: !disabled(env),
           service: "step-progress-api",
-          mode: "phase3-dummy-write",
+          mode: "phase4-limited-dual-write",
           productionWriteApproved: String(env.PRODUCTION_WRITE_APPROVED) === "true",
           testWriteApproved: String(env.TEST_WRITE_APPROVED) === "true",
+          dualWriteEnabled: String(env.DUAL_WRITE_ENABLED) === "true",
           testStudentId: env.TEST_STUDENT_ID,
         }, disabled(env) ? 503 : 200);
       }
       if (disabled(env)) return json({ error: "SERVICE_DISABLED" }, 503);
       if (!(await measured(trace, "auth", () => authorize(request, env)))) return withTrace(json({ error: "UNAUTHORIZED" }, 401), trace);
+
+      const syncMatch = url.pathname.match(/^\/sync\/([^/]+)$/);
+      if (request.method === "GET" && syncMatch) return withTrace(await handleSyncStatus(env, decodeURIComponent(syncMatch[1])), trace);
 
       const readMatch = url.pathname.match(/^\/students\/([^/]+)(?:\/(materials|targets|progress|homework|summary|bundle))?$/);
       if (request.method === "GET" && readMatch) {
@@ -289,11 +398,14 @@ export default {
       const entityId = decodeURIComponent(writeMatch[3]).trim();
       const action = writeMatch[4] || "";
 
-      if (request.method === "PATCH" && entity === "progress" && !action) return withTrace(await handleProgressWrite(request, env, studentId, entityId, trace), trace);
-      if (request.method === "PATCH" && entity === "homework" && action === "dates") return withTrace(await handleHomeworkDates(request, env, studentId, entityId, trace), trace);
-      if (request.method === "POST" && entity === "homework" && action === "archive") return withTrace(await handleHomeworkArchive(request, env, studentId, entityId, false, trace), trace);
-      if (request.method === "POST" && entity === "homework" && action === "restore") return withTrace(await handleHomeworkArchive(request, env, studentId, entityId, true, trace), trace);
-      if (request.method === "PATCH" && entity === "targets" && !action) return withTrace(await handleTargetWrite(request, env, studentId, entityId, trace), trace);
+      const requestCopy = request.clone();
+      let mutationResponse: Response | null = null;
+      if (request.method === "PATCH" && entity === "progress" && !action) mutationResponse = await handleProgressWrite(request, env, studentId, entityId, trace);
+      if (request.method === "PATCH" && entity === "homework" && action === "dates") mutationResponse = await handleHomeworkDates(request, env, studentId, entityId, trace);
+      if (request.method === "POST" && entity === "homework" && action === "archive") mutationResponse = await handleHomeworkArchive(request, env, studentId, entityId, false, trace);
+      if (request.method === "POST" && entity === "homework" && action === "restore") mutationResponse = await handleHomeworkArchive(request, env, studentId, entityId, true, trace);
+      if (request.method === "PATCH" && entity === "targets" && !action) mutationResponse = await handleTargetWrite(request, env, studentId, entityId, trace);
+      if (mutationResponse) return withTrace(await dualWrite(requestCopy, mutationResponse, env, ctx, studentId, entity, entityId, action, trace), trace);
       return json({ error: "METHOD_NOT_ALLOWED" }, 405, { allow: "GET, PATCH, POST" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "UNKNOWN_ERROR";
@@ -302,6 +414,9 @@ export default {
       if (message.startsWith("INVALID_")) return json({ error: message }, 400);
       return json({ error: "INTERNAL_ERROR" }, 500);
     }
+  },
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runDueSyncs(env));
   },
 } satisfies ExportedHandler<Env>;
 
