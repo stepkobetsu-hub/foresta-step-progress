@@ -4,6 +4,7 @@ export interface Env {
   ADMIN_API_ENABLED: string;
   EMERGENCY_STOP: string;
   MIRROR_READ_ENABLED: string;
+  MIRROR_COMPARE_TOKEN?: string;
 }
 
 const json = (value: unknown, status = 200) =>
@@ -37,6 +38,12 @@ export default {
 
     const match = url.pathname.match(/^\/mirror\/students\/([^/]+)$/);
     if (!match) return json({ error: "NOT_FOUND" }, 404);
+
+    const expectedToken = env.MIRROR_COMPARE_TOKEN || "";
+    const suppliedToken = (request.headers.get("authorization") || "").replace(/^Bearer\\s+/i, "");
+    if (!expectedToken || suppliedToken !== expectedToken) {
+      return json({ error: "UNAUTHORIZED" }, 401);
+    }
 
     const studentId = decodeURIComponent(match[1]).trim();
     if (!studentId || studentId.length > 64) return json({ error: "INVALID_STUDENT_ID" }, 400);
