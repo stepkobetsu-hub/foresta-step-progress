@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "step-progress-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-03",
+  "vars": {
+    "PRODUCTION_WRITE_APPROVED": "false",
+    "ADMIN_API_ENABLED": "false",
+    "EMERGENCY_STOP": "false",
+    "MIRROR_READ_ENABLED": "true"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "step-progress-db",
+      "database_id": "REPLACE_AFTER_D1_CREATION",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
