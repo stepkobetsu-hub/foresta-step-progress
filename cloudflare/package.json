@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.9 seconds
+Output:
 {
   "name": "step-progress-cloudflare",
   "private": true,
@@ -10,8 +13,9 @@
     "d1:migrate:remote": "wrangler d1 migrations apply step-progress-db --remote"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260801.1",
+    "@types/node": "^24.0.0",
     "typescript": "^7.0.2",
     "wrangler": "^4.118.0"
   }
 }
+
