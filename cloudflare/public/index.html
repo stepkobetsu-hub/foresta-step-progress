@@ -54,8 +54,9 @@
   const release=()=>{state.activeRequests--;state.waiters.shift()?.()};
   const withSlot=async work=>{await acquire();try{return await work()}finally{release()}};
   const api=async(path,options={})=>{
-    const started=performance.now(),requestStartEpoch=Date.now();
-    const response=await fetch(path,{...options,headers:{"content-type":"application/json",authorization:"Bearer "+state.token,...options.headers}});
+    const started=performance.now(),requestStartEpoch=Date.now(),controller=new AbortController(),timeout=setTimeout(()=>controller.abort("SAVE_TIMEOUT"),8000);
+    let response;
+    try{response=await fetch(path,{...options,signal:controller.signal,headers:{"content-type":"application/json",authorization:"Bearer "+state.token,...options.headers}})}finally{clearTimeout(timeout)}
     const headersReceived=performance.now(),workerTiming=JSON.parse(response.headers.get("x-worker-timing")||"{}"),workerArrival=Number(response.headers.get("x-worker-arrival")||0);
     const data=await response.json();
     if(!response.ok){const error=new Error(data.error||"保存に失敗しました");error.status=response.status;error.data=data;throw error}
