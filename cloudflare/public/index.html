@@ -65,6 +65,7 @@
   };
   const setGlobal=(text,error=false)=>{$("globalStatus").textContent=text;$("globalStatus").className=error?"error":"muted"};
   const badge=(id,text,kind="")=>{const el=document.querySelector('[data-status="'+CSS.escape(id)+'"]');if(el){el.textContent=text;el.className="status "+kind}};
+  const pollSync=async(syncId,key,generation)=>{for(let i=0;i<30;i++){await new Promise(resolve=>setTimeout(resolve,1000));try{const {data}=await api("/sync/"+encodeURIComponent(syncId));const s=data.sync||{};if(state.generations.get(key)!==generation)return;if(s.status==="SAVED"){badge(key,"保存済み","saved");return}if(s.status==="SYNC_ERROR"){badge(key,"同期エラー・再試行","failed");return}badge(key,s.google_status==="ERROR"?"Cloudflareのみ保存・再試行中":"同期中","saving")}catch(error){if(state.generations.get(key)===generation)badge(key,"同期状態を確認中","saving")}}};
   const updateSummary=()=>{
     const targets=state.data.targets.filter(x=>Number(x.included)===1),done=state.data.progress.filter(x=>Number(x.try_completed)===1).length;
     $("targetCount").textContent=targets.length;$("completedCount").textContent=done;$("progressRate").textContent=targets.length?Math.round(done/targets.length*100)+"%":"—";
@@ -78,7 +79,7 @@
     try{
       const payload={...body,expectedVersion:getVersion?getVersion():body.expectedVersion,requestId:id};
       const {data,elapsedMs,network}=await api(path,{method,body:JSON.stringify(payload)});
-      merge(data);state.failed.delete(key);const savedAt=performance.now();if(state.generations.get(key)===generation)badge(key,"保存済み "+Math.round(elapsedMs)+"ms","saved");
+      merge(data);state.failed.delete(key);const savedAt=performance.now();if(state.generations.get(key)===generation){const sync=data.sync||{};const label=sync.status==="SAVED"?"保存済み":sync.status==="CLOUDFLARE_ONLY"?"Cloudflareのみ保存":"同期中";badge(key,label+" "+Math.round(elapsedMs)+"ms",sync.status==="SAVED"?"saved":"saving");if(sync.syncId&&sync.status!=="SAVED")void pollSync(sync.syncId,key,generation)}
       const result={operation,key,domMs,queueMs:requestStartedAt-domReflectedAt,elapsedMs,savedDisplayMs:savedAt-eventStartedAt,network,timestamp:new Date().toISOString()};metrics.push(result);document.documentElement.dataset.phase35Metrics=JSON.stringify(metrics);return result;
     }catch(error){
       if(state.generations.get(key)===generation)rollback();
