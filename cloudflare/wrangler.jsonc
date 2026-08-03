@@ -1,15 +1,25 @@
+Exit code: 0
+Wall time: 1.6 seconds
+Output:
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "step-progress-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-03",
+  "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "PRODUCTION_WRITE_APPROVED": "false",
+    "TEST_WRITE_APPROVED": "true",
+    "TEST_STUDENT_ID": "TEST-STUDENT-01",
     "ADMIN_API_ENABLED": "false",
     "EMERGENCY_STOP": "false",
     "MIRROR_READ_ENABLED": "true"
   },
   "observability": {"enabled": true, "head_sampling_rate": 1},
+  "assets": {
+    "directory": "./public",
+    "run_worker_first": ["/health", "/students/*"]
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -19,3 +29,4 @@
     }
   ]
 }
+
