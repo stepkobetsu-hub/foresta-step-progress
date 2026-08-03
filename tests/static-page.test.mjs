@@ -95,6 +95,16 @@ test("homework controls remain compact and preserve existing statuses", () => {
   assert.match(html, /teacherStatus!=='UNCONFIRMED'/);
 });
 
+test("admin student homework supports per-student archive and restore", () => {
+  assert.match(html, /homeworkArchiveKey_\(studentId=''/);
+  assert.match(html, /archivedHomeworkGroups_\(studentId\)/);
+  assert.match(html, /data-admin-archive-view/);
+  assert.match(html, /data-admin-archive-group/);
+  assert.match(html, /setHomeworkArchived_\(archive\.dataset\.adminArchiveGroup,archive\.dataset\.archived==='true',studentId\)/);
+  assert.match(html, /reviewGroupHtml_\(group,\{archived:/);
+  assert.match(html, /state\.homeworkArchiveView\?['"]宿題へ戻る['"]/);
+});
+
 test("homework encouragement is deterministic and uses the fixed candidate list", () => {
   for (const message of ["🌟 GOOD!", "✨ GREAT!", "👏 その調子！", "🎉 ナイス！", "⭐ よくできました！", "💮 ばっちり！", "👍 いいね！", "🚩 一歩前進！", "🏆 すばらしい！", "😊 よくがんばったね！"]) {
     assert.match(html, new RegExp(message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
