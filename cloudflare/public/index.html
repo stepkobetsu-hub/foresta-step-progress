@@ -1,9 +1,12 @@
+Exit code: 0
+Wall time: 1.5 seconds
+Output:
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Cloudflare版 学習進捗管理（第4段階）</title>
+  <title>Cloudflare迚・蟄ｦ鄙帝ｲ謐礼ｮ｡逅・ｼ育ｬｬ4谿ｵ髫趣ｼ・/title>
   <style>
     :root{font-family:Inter,"Noto Sans JP",system-ui,sans-serif;color:#172033;background:#f4f7fb}
     *{box-sizing:border-box}body{margin:0}header{background:#111827;color:white;padding:18px 24px;display:flex;justify-content:space-between;gap:16px;align-items:center}
@@ -21,25 +24,25 @@
 </head>
 <body>
 <header>
-  <div><h1>Cloudflare版 学習進捗管理</h1><small>第4段階・TEST-STUDENT-01限定二重保存</small></div>
-  <div class="safe">本番保存 OFF ／ テスト保存 ON</div>
+  <div><h1>Cloudflare迚・蟄ｦ鄙帝ｲ謐礼ｮ｡逅・/h1><small>隨ｬ4谿ｵ髫弱・TEST-STUDENT-01髯仙ｮ壻ｺ碁㍾菫晏ｭ・/small></div>
+  <div class="safe">譛ｬ逡ｪ菫晏ｭ・OFF ・・繝・せ繝井ｿ晏ｭ・ON</div>
 </header>
 <main>
   <section class="card">
-    <h2>接続</h2>
-    <div class="auth"><input id="token" type="password" autocomplete="off" placeholder="比較・検証用アクセストークン"><button id="load">テスト生徒Aを表示</button></div>
-    <p class="muted">トークンはこの画面のメモリ内だけで使用し、保存しません。</p>
-    <p id="globalStatus" class="muted">未接続</p>
+    <h2>謗･邯・/h2>
+    <div class="auth"><input id="token" type="password" autocomplete="off" placeholder="豈碑ｼ・・讀懆ｨｼ逕ｨ繧｢繧ｯ繧ｻ繧ｹ繝医・繧ｯ繝ｳ"><button id="load">繝・せ繝育函蠕但繧定｡ｨ遉ｺ</button></div>
+    <p class="muted">繝医・繧ｯ繝ｳ縺ｯ縺薙・逕ｻ髱｢縺ｮ繝｡繝｢繝ｪ蜀・□縺代〒菴ｿ逕ｨ縺励∽ｿ晏ｭ倥＠縺ｾ縺帙ｓ縲・/p>
+    <p id="globalStatus" class="muted">譛ｪ謗･邯・/p>
   </section>
   <div id="app" class="hidden">
-    <section class="card"><h2 id="studentName">—</h2><div class="grid">
-      <div class="metric">教材<b id="materialCount">0</b></div><div class="metric">目標単元<b id="targetCount">0</b></div>
-      <div class="metric">完了<b id="completedCount">0</b></div><div class="metric">進捗率<b id="progressRate">0%</b></div>
+    <section class="card"><h2 id="studentName">窶・/h2><div class="grid">
+      <div class="metric">謨呎攝<b id="materialCount">0</b></div><div class="metric">逶ｮ讓吝腰蜈・b id="targetCount">0</b></div>
+      <div class="metric">螳御ｺ・b id="completedCount">0</b></div><div class="metric">騾ｲ謐礼紫<b id="progressRate">0%</b></div>
     </div></section>
-    <div class="tabs"><button data-tab="progress" class="active">進捗</button><button data-tab="homework">宿題</button><button data-tab="targets">目標範囲</button></div>
-    <section id="progressPanel" class="card"><h2>進捗保存</h2><div id="progressRows"></div></section>
-    <section id="homeworkPanel" class="card hidden"><h2>宿題日付・アーカイブ</h2><div id="homeworkRows"></div></section>
-    <section id="targetsPanel" class="card hidden"><h2>目標範囲</h2><div id="targetRows"></div></section>
+    <div class="tabs"><button data-tab="progress" class="active">騾ｲ謐・/button><button data-tab="homework">螳ｿ鬘・/button><button data-tab="targets">逶ｮ讓咏ｯ・峇</button></div>
+    <section id="progressPanel" class="card"><h2>騾ｲ謐嶺ｿ晏ｭ・/h2><div id="progressRows"></div></section>
+    <section id="homeworkPanel" class="card hidden"><h2>螳ｿ鬘梧律莉倥・繧｢繝ｼ繧ｫ繧､繝・/h2><div id="homeworkRows"></div></section>
+    <section id="targetsPanel" class="card hidden"><h2>逶ｮ讓咏ｯ・峇</h2><div id="targetRows"></div></section>
   </div>
 </main>
 <script>
@@ -59,67 +62,67 @@
     try{response=await fetch(path,{...options,signal:controller.signal,headers:{"content-type":"application/json",authorization:"Bearer "+state.token,...options.headers}})}finally{clearTimeout(timeout)}
     const headersReceived=performance.now(),workerTiming=JSON.parse(response.headers.get("x-worker-timing")||"{}"),workerArrival=Number(response.headers.get("x-worker-arrival")||0);
     const data=await response.json();
-    if(!response.ok){const error=new Error(data.error||"保存に失敗しました");error.status=response.status;error.data=data;throw error}
+    if(!response.ok){const error=new Error(data.error||"菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆");error.status=response.status;error.data=data;throw error}
     const ended=performance.now(),resource=performance.getEntriesByName(new URL(path,location.href).href,"resource").at(-1);
     return {data,elapsedMs:ended-started,network:{requestStartEpoch,headersMs:headersReceived-started,bodyMs:ended-headersReceived,workerArrival,workerTiming,dnsMs:resource?resource.domainLookupEnd-resource.domainLookupStart:0,connectMs:resource?resource.connectEnd-resource.connectStart:0,tlsMs:resource&&resource.secureConnectionStart>0?resource.connectEnd-resource.secureConnectionStart:0,requestToFirstByteMs:resource?resource.responseStart-resource.requestStart:0,responseDownloadMs:resource?resource.responseEnd-resource.responseStart:0}};
   };
   const setGlobal=(text,error=false)=>{$("globalStatus").textContent=text;$("globalStatus").className=error?"error":"muted"};
   const badge=(id,text,kind="")=>{const el=document.querySelector('[data-status="'+CSS.escape(id)+'"]');if(el){el.textContent=text;el.className="status "+kind}};
-  const pollSync=async(syncId,key,generation)=>{for(let i=0;i<30;i++){await new Promise(resolve=>setTimeout(resolve,1000));try{const {data}=await api("/sync/"+encodeURIComponent(syncId));const s=data.sync||{};if(state.generations.get(key)!==generation)return;if(s.status==="SAVED"){badge(key,"保存済み","saved");return}if(s.status==="SYNC_ERROR"){badge(key,"同期エラー・再試行","failed");return}badge(key,s.google_status==="ERROR"?"Cloudflareのみ保存・再試行中":"同期中","saving")}catch(error){if(state.generations.get(key)===generation)badge(key,"同期状態を確認中","saving")}}};
+  const pollSync=async(syncId,key,generation)=>{for(let i=0;i<90;i++){await new Promise(resolve=>setTimeout(resolve,1000));try{const {data}=await api("/sync/"+encodeURIComponent(syncId));const s=data.sync||{};if(state.generations.get(key)!==generation)return;if(s.status==="SAVED"){badge(key,"菫晏ｭ俶ｸ医∩","saved");return}if(s.status==="FAILED"){badge(key,"繝舌ャ繧ｯ繧｢繝・・蜷梧悄繧ｨ繝ｩ繝ｼ繝ｻ蜀崎ｩｦ陦・,"failed");return}badge(key,s.google_status==="ERROR"?"菫晏ｭ俶ｸ医∩繝ｻ繝舌ャ繧ｯ繧｢繝・・蜀崎ｩｦ陦御ｸｭ":"菫晏ｭ俶ｸ医∩繝ｻ繝舌ャ繧ｯ繧｢繝・・蜷梧悄蠕・■","saving")}catch(error){if(state.generations.get(key)===generation)badge(key,"菫晏ｭ俶ｸ医∩繝ｻ蜷梧悄迥ｶ諷狗｢ｺ隱堺ｸｭ","saving")}}};
   const updateSummary=()=>{
     const targets=state.data.targets.filter(x=>Number(x.included)===1),done=state.data.progress.filter(x=>Number(x.try_completed)===1).length;
-    $("targetCount").textContent=targets.length;$("completedCount").textContent=done;$("progressRate").textContent=targets.length?Math.round(done/targets.length*100)+"%":"—";
+    $("targetCount").textContent=targets.length;$("completedCount").textContent=done;$("progressRate").textContent=targets.length?Math.round(done/targets.length*100)+"%":"窶・;
   };
   const saveOptimistic=async({key,path,method,body,getVersion,apply,rollback,merge,eventStartedAt=performance.now(),operation="unknown"})=>{
     const id=requestId(),started=performance.now(),generation=(state.generations.get(key)||0)+1;state.generations.set(key,generation);apply();
-    const domReflectedAt=performance.now(),domMs=domReflectedAt-eventStartedAt;badge(key,"保存中","saving");
+    const domReflectedAt=performance.now(),domMs=domReflectedAt-eventStartedAt;badge(key,"菫晏ｭ倅ｸｭ","saving");
     const prior=state.chains.get(key)||Promise.resolve();
     const task=prior.catch(()=>{}).then(()=>withSlot(async()=>{
     const requestStartedAt=performance.now();
     try{
       const payload={...body,expectedVersion:getVersion?getVersion():body.expectedVersion,requestId:id};
       const {data,elapsedMs,network}=await api(path,{method,body:JSON.stringify(payload)});
-      merge(data);state.failed.delete(key);const savedAt=performance.now();if(state.generations.get(key)===generation){const sync=data.sync||{};const label=sync.status==="SAVED"?"保存済み":sync.status==="CLOUDFLARE_ONLY"?"Cloudflareのみ保存":"同期中";badge(key,label+" "+Math.round(elapsedMs)+"ms",sync.status==="SAVED"?"saved":"saving");if(sync.syncId&&sync.status!=="SAVED")void pollSync(sync.syncId,key,generation)}
+      merge(data);state.failed.delete(key);const savedAt=performance.now();if(state.generations.get(key)===generation){const sync=data.sync||{};const label=sync.status==="SAVED"?"菫晏ｭ俶ｸ医∩":"菫晏ｭ俶ｸ医∩繝ｻ繝舌ャ繧ｯ繧｢繝・・蜷梧悄蠕・■";badge(key,label+" "+Math.round(elapsedMs)+"ms",sync.status==="SAVED"?"saved":"saving");if(sync.syncId&&sync.status!=="SAVED")void pollSync(sync.syncId,key,generation)}
       const result={operation,key,domMs,queueMs:requestStartedAt-domReflectedAt,elapsedMs,savedDisplayMs:savedAt-eventStartedAt,network,timestamp:new Date().toISOString()};metrics.push(result);document.documentElement.dataset.phase35Metrics=JSON.stringify(metrics);return result;
     }catch(error){
       if(state.generations.get(key)===generation)rollback();
       const retry=()=>saveOptimistic({key,path,method,body,getVersion,apply,rollback,merge,eventStartedAt:performance.now(),operation});
       state.failed.set(key,retry);
-      if(state.generations.get(key)===generation)badge(key,error.status===409?"競合：再読込してください":"保存できませんでした","failed");
+      if(state.generations.get(key)===generation)badge(key,error.status===409?"遶ｶ蜷茨ｼ壼・隱ｭ霎ｼ縺励※縺上□縺輔＞":"菫晏ｭ倥〒縺阪∪縺帙ｓ縺ｧ縺励◆","failed");
       renderRetry(key);throw error;
     }
     }));
     state.chains.set(key,task);task.finally(()=>{if(state.chains.get(key)===task)state.chains.delete(key)}).catch(()=>{});
     return task;
   };
-  const renderRetry=key=>{const box=document.querySelector('[data-controls="'+CSS.escape(key)+'"]');if(box&&!box.querySelector(".retry")){const b=document.createElement("button");b.className="secondary retry";b.textContent="再試行";b.onclick=()=>state.failed.get(key)?.();box.appendChild(b)}};
+  const renderRetry=key=>{const box=document.querySelector('[data-controls="'+CSS.escape(key)+'"]');if(box&&!box.querySelector(".retry")){const b=document.createElement("button");b.className="secondary retry";b.textContent="蜀崎ｩｦ陦・;b.onclick=()=>state.failed.get(key)?.();box.appendChild(b)}};
   const render=()=>{
-    const d=state.data;$("app").classList.remove("hidden");$("studentName").textContent=d.student.display_name+"（"+d.student.grade+"／"+d.student.campus+"）";
+    const d=state.data;$("app").classList.remove("hidden");$("studentName").textContent=d.student.display_name+"・・+d.student.grade+"・・+d.student.campus+"・・;
     $("materialCount").textContent=d.materials.length;updateSummary();
-    $("progressRows").innerHTML=d.progress.map(p=>{const key="p-"+p.record_id;return '<div class="row"><div><b>'+esc(p.unit_title)+'</b><div class="muted">'+esc(p.subject)+'・'+p.round+'周目</div></div><div class="controls" data-controls="'+key+'"><label class="check"><input type="checkbox" data-progress="'+esc(p.record_id)+'" '+(Number(p.try_completed)?"checked":"")+'> TRY完了</label><span class="status" data-status="'+key+'">待機中</span></div></div>'}).join("");
-    $("homeworkRows").innerHTML=d.homework.map(h=>{const key="h-"+h.homework_id;return '<div class="row"><div><b>'+esc(h.unit_title)+'</b><div class="muted">'+esc(h.status)+'</div></div><div class="controls" data-controls="'+key+'"><input class="date" type="date" data-date="'+esc(h.homework_id)+'" value="'+esc(h.due_date||"")+'"><button class="secondary" data-save-date="'+esc(h.homework_id)+'">日付保存</button><button class="'+(h.archived_at?"secondary":"danger")+'" data-archive="'+esc(h.homework_id)+'">'+(h.archived_at?"復活":"アーカイブ")+'</button><span class="status" data-status="'+key+'">待機中</span></div></div>'}).join("");
-    $("targetRows").innerHTML=d.targets.map(t=>{const key="t-"+t.target_id;return '<div class="row"><div><b>'+esc(t.unit_title)+'</b><div class="muted">'+esc(t.subject)+' <span class="pill">'+esc(t.unit_type)+'</span></div></div><div class="controls" data-controls="'+key+'"><label class="check"><input type="checkbox" data-target="'+esc(t.target_id)+'" '+(Number(t.included)?"checked":"")+'> 目標に含める</label><span class="status" data-status="'+key+'">待機中</span></div></div>'}).join("");
+    $("progressRows").innerHTML=d.progress.map(p=>{const key="p-"+p.record_id;return '<div class="row"><div><b>'+esc(p.unit_title)+'</b><div class="muted">'+esc(p.subject)+'繝ｻ'+p.round+'蜻ｨ逶ｮ</div></div><div class="controls" data-controls="'+key+'"><label class="check"><input type="checkbox" data-progress="'+esc(p.record_id)+'" '+(Number(p.try_completed)?"checked":"")+'> TRY螳御ｺ・/label><span class="status" data-status="'+key+'">蠕・ｩ滉ｸｭ</span></div></div>'}).join("");
+    $("homeworkRows").innerHTML=d.homework.map(h=>{const key="h-"+h.homework_id;return '<div class="row"><div><b>'+esc(h.unit_title)+'</b><div class="muted">'+esc(h.status)+'</div></div><div class="controls" data-controls="'+key+'"><input class="date" type="date" data-date="'+esc(h.homework_id)+'" value="'+esc(h.due_date||"")+'"><button class="secondary" data-save-date="'+esc(h.homework_id)+'">譌･莉倅ｿ晏ｭ・/button><button class="'+(h.archived_at?"secondary":"danger")+'" data-archive="'+esc(h.homework_id)+'">'+(h.archived_at?"蠕ｩ豢ｻ":"繧｢繝ｼ繧ｫ繧､繝・)+'</button><span class="status" data-status="'+key+'">蠕・ｩ滉ｸｭ</span></div></div>'}).join("");
+    $("targetRows").innerHTML=d.targets.map(t=>{const key="t-"+t.target_id;return '<div class="row"><div><b>'+esc(t.unit_title)+'</b><div class="muted">'+esc(t.subject)+' <span class="pill">'+esc(t.unit_type)+'</span></div></div><div class="controls" data-controls="'+key+'"><label class="check"><input type="checkbox" data-target="'+esc(t.target_id)+'" '+(Number(t.included)?"checked":"")+'> 逶ｮ讓吶↓蜷ｫ繧√ｋ</label><span class="status" data-status="'+key+'">蠕・ｩ滉ｸｭ</span></div></div>'}).join("");
     bind();
   };
   const bind=()=>{
     document.querySelectorAll("[data-progress]").forEach(input=>input.onchange=async()=>{const eventStartedAt=performance.now();
       const p=state.data.progress.find(x=>x.record_id===input.dataset.progress),before=p.try_completed,after=input.checked?1:0,key="p-"+p.record_id;
-      try{await saveOptimistic({operation:"progress",key,path:"/students/"+STUDENT_ID+"/progress/"+encodeURIComponent(p.record_id),method:"PATCH",body:{tryCompleted:Boolean(after)},getVersion:()=>p.version,eventStartedAt,apply:()=>{p.try_completed=after;updateSummary()},rollback:()=>{p.try_completed=before;input.checked=Boolean(before);updateSummary()},merge:r=>Object.assign(p,r.progress)})}catch(error){setGlobal(error.status===409?"競合を検知しました。再読込してください。":"進捗保存に失敗しました。",true)}
+      try{await saveOptimistic({operation:"progress",key,path:"/students/"+STUDENT_ID+"/progress/"+encodeURIComponent(p.record_id),method:"PATCH",body:{tryCompleted:Boolean(after)},getVersion:()=>p.version,eventStartedAt,apply:()=>{p.try_completed=after;updateSummary()},rollback:()=>{p.try_completed=before;input.checked=Boolean(before);updateSummary()},merge:r=>Object.assign(p,r.progress)})}catch(error){setGlobal(error.status===409?"遶ｶ蜷医ｒ讀懃衍縺励∪縺励◆縲ょ・隱ｭ霎ｼ縺励※縺上□縺輔＞縲・:"騾ｲ謐嶺ｿ晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
     });
     document.querySelectorAll("[data-save-date]").forEach(button=>button.onclick=async()=>{const eventStartedAt=performance.now();
       const h=state.data.homework.find(x=>x.homework_id===button.dataset.saveDate),input=document.querySelector('[data-date="'+CSS.escape(h.homework_id)+'"]'),before=h.due_date,after=input.value||null,key="h-"+h.homework_id;
-      try{await saveOptimistic({operation:"homework-date",key,path:"/students/"+STUDENT_ID+"/homework/"+encodeURIComponent(h.homework_id)+"/dates",method:"PATCH",body:{dueDate:after},getVersion:()=>h.version,eventStartedAt,apply:()=>{h.due_date=after},rollback:()=>{h.due_date=before;input.value=before||""},merge:r=>Object.assign(h,r.homework)})}catch(error){setGlobal("宿題日付の保存に失敗しました。",true)}
+      try{await saveOptimistic({operation:"homework-date",key,path:"/students/"+STUDENT_ID+"/homework/"+encodeURIComponent(h.homework_id)+"/dates",method:"PATCH",body:{dueDate:after},getVersion:()=>h.version,eventStartedAt,apply:()=>{h.due_date=after},rollback:()=>{h.due_date=before;input.value=before||""},merge:r=>Object.assign(h,r.homework)})}catch(error){setGlobal("螳ｿ鬘梧律莉倥・菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
     });
     document.querySelectorAll("[data-archive]").forEach(button=>button.onclick=async()=>{const eventStartedAt=performance.now();
       const h=state.data.homework.find(x=>x.homework_id===button.dataset.archive),before={archived_at:h.archived_at,restored_at:h.restored_at},restore=Boolean(h.archived_at),key="h-"+h.homework_id;
-      try{await saveOptimistic({operation:restore?"homework-restore":"homework-archive",key,path:"/students/"+STUDENT_ID+"/homework/"+encodeURIComponent(h.homework_id)+"/"+(restore?"restore":"archive"),method:"POST",body:{},getVersion:()=>h.version,eventStartedAt,apply:()=>{h.archived_at=restore?null:new Date().toISOString();button.textContent=restore?"アーカイブ":"復活"},rollback:()=>{Object.assign(h,before);button.textContent=restore?"復活":"アーカイブ"},merge:r=>{Object.assign(h,r.homework);render()}})}catch(error){setGlobal("アーカイブ操作に失敗しました。",true)}
+      try{await saveOptimistic({operation:restore?"homework-restore":"homework-archive",key,path:"/students/"+STUDENT_ID+"/homework/"+encodeURIComponent(h.homework_id)+"/"+(restore?"restore":"archive"),method:"POST",body:{},getVersion:()=>h.version,eventStartedAt,apply:()=>{h.archived_at=restore?null:new Date().toISOString();button.textContent=restore?"繧｢繝ｼ繧ｫ繧､繝・:"蠕ｩ豢ｻ"},rollback:()=>{Object.assign(h,before);button.textContent=restore?"蠕ｩ豢ｻ":"繧｢繝ｼ繧ｫ繧､繝・},merge:r=>{Object.assign(h,r.homework);render()}})}catch(error){setGlobal("繧｢繝ｼ繧ｫ繧､繝匁桃菴懊↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
     });
     document.querySelectorAll("[data-target]").forEach(input=>input.onchange=async()=>{const eventStartedAt=performance.now();
       const t=state.data.targets.find(x=>x.target_id===input.dataset.target),before=t.included,after=input.checked?1:0,key="t-"+t.target_id;
-      try{await saveOptimistic({operation:"target",key,path:"/students/"+STUDENT_ID+"/targets/"+encodeURIComponent(t.target_id),method:"PATCH",body:{included:Boolean(after)},getVersion:()=>t.version,eventStartedAt,apply:()=>{t.included=after;updateSummary()},rollback:()=>{t.included=before;input.checked=Boolean(before);updateSummary()},merge:r=>Object.assign(t,r.target)})}catch(error){setGlobal("目標範囲の保存に失敗しました。",true)}
+      try{await saveOptimistic({operation:"target",key,path:"/students/"+STUDENT_ID+"/targets/"+encodeURIComponent(t.target_id),method:"PATCH",body:{included:Boolean(after)},getVersion:()=>t.version,eventStartedAt,apply:()=>{t.included=after;updateSummary()},rollback:()=>{t.included=before;input.checked=Boolean(before);updateSummary()},merge:r=>Object.assign(t,r.target)})}catch(error){setGlobal("逶ｮ讓咏ｯ・峇縺ｮ菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆縲・,true)}
     });
   };
-  $("load").onclick=async()=>{state.token=$("token").value.trim();if(!state.token)return setGlobal("アクセストークンを入力してください。",true);setGlobal("読み込み中…");try{const {data,elapsedMs}=await api("/students/"+STUDENT_ID);state.data=data;render();setGlobal("読込済み "+Math.round(elapsedMs)+"ms")}catch(error){setGlobal("読み込みに失敗しました。",true)}};
+  $("load").onclick=async()=>{state.token=$("token").value.trim();if(!state.token)return setGlobal("繧｢繧ｯ繧ｻ繧ｹ繝医・繧ｯ繝ｳ繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・,true);setGlobal("隱ｭ縺ｿ霎ｼ縺ｿ荳ｭ窶ｦ");try{const {data,elapsedMs}=await api("/students/"+STUDENT_ID);state.data=data;render();setGlobal("隱ｭ霎ｼ貂医∩ "+Math.round(elapsedMs)+"ms")}catch(error){setGlobal("隱ｭ縺ｿ霎ｼ縺ｿ縺ｫ螟ｱ謨励＠縺ｾ縺励◆縲・,true)}};
   document.querySelectorAll("[data-tab]").forEach(button=>button.onclick=()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("active",x===button));["progress","homework","targets"].forEach(name=>$(name+"Panel").classList.toggle("hidden",name!==button.dataset.tab))});
 })();
 </script>
