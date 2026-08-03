@@ -10,15 +10,18 @@ Output:
   "vars": {
     "PRODUCTION_WRITE_APPROVED": "false",
     "TEST_WRITE_APPROVED": "true",
+    "DUAL_WRITE_ENABLED": "true",
+    "GOOGLE_DUAL_WRITE_URL": "https://script.google.com/macros/s/AKfycbyby9F8K2I3ZWpC-sL_vsNpOw_VwOSVqfWXayFviWwz44kpUlSTJOfmKHxaqD27AcxTBA/exec",
     "TEST_STUDENT_ID": "TEST-STUDENT-01",
     "ADMIN_API_ENABLED": "false",
     "EMERGENCY_STOP": "false",
     "MIRROR_READ_ENABLED": "true"
   },
   "observability": {"enabled": true, "head_sampling_rate": 1},
+  "triggers": {"crons": ["* * * * *"]},
   "assets": {
     "directory": "./public",
-    "run_worker_first": ["/health", "/students/*"]
+    "run_worker_first": ["/health", "/students/*", "/sync/*"]
   },
   "d1_databases": [
     {
