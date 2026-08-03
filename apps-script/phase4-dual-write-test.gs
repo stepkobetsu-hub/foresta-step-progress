@@ -1,115 +1,22 @@
-const PHASE4 = Object.freeze({
-  SPREADSHEET_ID: '1axZz8nGy15srgo2DVladaY_KQ3XXVbNrOrk3zL1GqaI',
-  SHEET_NAME: 'Cloudflare同期検証',
-  TEST_STUDENT_ID: 'TEST-STUDENT-01',
-  TOKEN_PROPERTY: 'PHASE4_DUAL_WRITE_TOKEN',
-  MAX_ATTEMPTS: 3,
-  HEADERS: ['sync_id','student_id','operation_type','record_id','payload','request_id','attempt_count','last_error','next_retry_at','status','created_at','updated_at','version','record_state']
+Exit code: 0
+Wall time: 2 seconds
+Output:
+const PHASE45 = Object.freeze({
+  SPREADSHEET_ID:'1axZz8nGy15srgo2DVladaY_KQ3XXVbNrOrk3zL1GqaI', SHEET_NAME:'Cloudflare蜷梧悄讀懆ｨｼ',
+  TEST_STUDENT_ID:'TEST-STUDENT-01', TOKEN_PROPERTY:'PHASE4_DUAL_WRITE_TOKEN', MAX_BATCH_SIZE:25,
+  HEADERS:['sync_id','student_id','operation_type','record_id','payload','request_id','attempt_count','last_error','next_retry_at','status','created_at','updated_at','version','record_state']
 });
+function doPost(e){const started=Date.now();try{const b=JSON.parse((e&&e.postData&&e.postData.contents)||'{}');authenticate45_(b.token);if(b.action!=='batchWrite')return json45_({success:false,code:'METHOD_NOT_ALLOWED'});return json45_(batchWrite45_(b,started));}catch(x){return json45_({success:false,code:'INTERNAL_ERROR',error:String(x&&x.message||x)});}}
+function authenticate45_(token){const expected=PropertiesService.getScriptProperties().getProperty(PHASE45.TOKEN_PROPERTY);if(!expected||String(token||'')!==expected)throw new Error('UNAUTHORIZED');}
+function batchWrite45_(body,started){const ops=Array.isArray(body.operations)?body.operations:[];if(!ops.length||ops.length>PHASE45.MAX_BATCH_SIZE)return{success:false,code:'INVALID_BATCH_SIZE',results:[]};const lock=LockService.getScriptLock();lock.waitLock(20000);try{
+  const sheet=SpreadsheetApp.openById(PHASE45.SPREADSHEET_ID).getSheetByName(PHASE45.SHEET_NAME);if(!sheet)throw new Error('SYNC_SHEET_NOT_FOUND');
+  const values=sheet.getDataRange().getValues();if(values[0].map(String).join('|')!==PHASE45.HEADERS.join('|'))throw new Error('INVALID_SYNC_SHEET_SCHEMA');
+  const byRequest=new Map(),versions=new Map();for(let i=1;i<values.length;i++){byRequest.set(String(values[i][5]),i);if(String(values[i][9])==='SAVED'){const k=[values[i][1],values[i][2],values[i][3]].join('|');versions.set(k,Math.max(Number(versions.get(k)||0),Number(values[i][12]||0)));}}
+  const results=[];ops.forEach(op=>{const requestId=String(op.requestId||'');try{if(String(op.studentId)!==PHASE45.TEST_STUDENT_ID)throw new Error('TEST_STUDENT_ONLY');if(!requestId||!op.operationType||!op.recordId)throw new Error('INVALID_OPERATION');const existingIndex=byRequest.get(requestId);if(existingIndex!==undefined&&String(values[existingIndex][9])==='SAVED'){results.push({requestId,ok:true,duplicate:true,version:Number(values[existingIndex][12]),updatedAt:String(values[existingIndex][11])});return;}
+    const key=[op.studentId,op.operationType,op.recordId].join('|'),version=Number(versions.get(key)||0)+1,now=new Date().toISOString();const row=[String(op.syncId||''),String(op.studentId),String(op.operationType),String(op.recordId),JSON.stringify(op.payload||{}),requestId,1,'','','SAVED',now,now,version,String(op.recordState||'ACTIVE')];
+    if(existingIndex!==undefined)values[existingIndex]=row;else{values.push(row);byRequest.set(requestId,values.length-1);}versions.set(key,version);results.push({requestId,ok:true,version,updatedAt:now});
+  }catch(x){results.push({requestId,ok:false,error:String(x&&x.message||x)});}});
+  sheet.getRange(1,1,values.length,PHASE45.HEADERS.length).setValues(values);SpreadsheetApp.flush();return{success:results.every(r=>r.ok),batchId:String(body.batchId||''),results,googleMs:Date.now()-started};
+}finally{lock.releaseLock();}}
+function json45_(v){return ContentService.createTextOutput(JSON.stringify(v)).setMimeType(ContentService.MimeType.JSON);}
 
-function doGet() {
-  return json_({success:true, service:'cloudflare-phase4-dual-write-test', testStudentOnly:true});
-}
-
-function doPost(e) {
-  const startedAt = Date.now();
-  try {
-    const input = JSON.parse((e.postData && e.postData.contents) || '{}');
-    authenticate_(input.token);
-    if (String(input.student_id || '') !== PHASE4.TEST_STUDENT_ID) {
-      return json_({success:false, code:'FORBIDDEN_STUDENT_SCOPE'}, 403);
-    }
-    if (input.action === 'read') return json_(readSync_(input, startedAt));
-    if (input.action !== 'write') return json_({success:false, code:'METHOD_NOT_ALLOWED'}, 405);
-    return json_(upsertSync_(input, startedAt));
-  } catch (error) {
-    return json_({success:false, code:'INTERNAL_ERROR', error:String(error && error.message || error), googleMs:Date.now()-startedAt});
-  }
-}
-
-function authenticate_(token) {
-  const expected = PropertiesService.getScriptProperties().getProperty(PHASE4.TOKEN_PROPERTY);
-  if (!expected || String(token || '') !== expected) throw new Error('UNAUTHORIZED');
-}
-
-function getSheet_() {
-  const book = SpreadsheetApp.openById(PHASE4.SPREADSHEET_ID);
-  let sheet = book.getSheetByName(PHASE4.SHEET_NAME);
-  if (!sheet) {
-    sheet = book.insertSheet(PHASE4.SHEET_NAME);
-    sheet.getRange(1,1,1,PHASE4.HEADERS.length).setValues([PHASE4.HEADERS]);
-    sheet.setFrozenRows(1);
-  }
-  const current = sheet.getRange(1,1,1,PHASE4.HEADERS.length).getValues()[0].map(String);
-  if (current.join('|') !== PHASE4.HEADERS.join('|')) throw new Error('INVALID_SYNC_SHEET_SCHEMA');
-  return sheet;
-}
-
-function readRows_(sheet) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  return sheet.getRange(2,1,lastRow-1,PHASE4.HEADERS.length).getValues().map((values, index) => {
-    const row = {rowNumber:index+2};
-    PHASE4.HEADERS.forEach((header, column) => row[header] = values[column]);
-    return row;
-  });
-}
-
-function upsertSync_(input, startedAt) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-  try {
-    const sheet = getSheet_();
-    const rows = readRows_(sheet);
-    const requestId = String(input.request_id || '');
-    if (!requestId) throw new Error('REQUEST_ID_REQUIRED');
-    const duplicate = rows.find(row => String(row.request_id) === requestId);
-    if (duplicate) return responseFromRow_(duplicate, true, startedAt);
-    const recordId = String(input.record_id || '');
-    const operationType = String(input.operation_type || '');
-    const prior = rows.filter(row => String(row.record_id) === recordId && String(row.operation_type) === operationType)
-      .sort((a,b) => Number(b.version || 0) - Number(a.version || 0))[0];
-    const expectedVersion = Number(input.version || 0);
-    const currentVersion = Number(prior && prior.version || 0);
-    if (expectedVersion !== currentVersion) return {success:false, code:'VERSION_CONFLICT', status:'CONFLICT', expectedVersion, currentVersion, googleMs:Date.now()-startedAt};
-    const now = new Date().toISOString();
-    const version = currentVersion + 1;
-    const syncId = String(input.sync_id || Utilities.getUuid());
-    const payload = JSON.stringify(input.payload || {});
-    const state = String(input.record_state || 'ACTIVE');
-    const values = [syncId,PHASE4.TEST_STUDENT_ID,operationType,recordId,payload,requestId,1,'','',
-      'SAVED',now,now,version,state];
-    sheet.appendRow(values);
-    SpreadsheetApp.flush();
-    const row = {rowNumber:sheet.getLastRow()};
-    PHASE4.HEADERS.forEach((header,index) => row[header]=values[index]);
-    return responseFromRow_(row, false, startedAt);
-  } finally { lock.releaseLock(); }
-}
-
-function readSync_(input, startedAt) {
-  const sheet = getSheet_();
-  const rows = readRows_(sheet);
-  const syncId = String(input.sync_id || '');
-  const requestId = String(input.request_id || '');
-  const row = rows.find(item => (syncId && String(item.sync_id) === syncId) || (requestId && String(item.request_id) === requestId));
-  if (!row) return {success:false, code:'NOT_FOUND', googleMs:Date.now()-startedAt};
-  return responseFromRow_(row, true, startedAt);
-}
-
-function responseFromRow_(row, duplicate, startedAt) {
-  let payload = {};
-  try { payload = JSON.parse(String(row.payload || '{}')); } catch (error) {}
-  return {
-    success:true, sync_id:String(row.sync_id), student_id:String(row.student_id),
-    operation_type:String(row.operation_type), record_id:String(row.record_id), payload,
-    request_id:String(row.request_id), attempt_count:Number(row.attempt_count || 0),
-    status:String(row.status), version:Number(row.version || 0),
-    record_state:String(row.record_state || ''), updated_at:String(row.updated_at || ''),
-    duplicate:!!duplicate, googleMs:Date.now()-startedAt
-  };
-}
-
-function json_(value) {
-  return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
-}
