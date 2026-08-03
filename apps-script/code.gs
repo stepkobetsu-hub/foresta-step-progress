@@ -26222,7 +26222,7 @@ function getAdminStudentList_(session, filters) {
   const cacheDigest = Utilities.base64EncodeWebSafe(
     Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(cacheFilter))
   ).replace(/=+$/, '');
-  const cacheKey = ['FS','ADMIN_LIST',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,session.role,cacheDigest].join(':');
+  const cacheKey = ['FS','ADMIN_LIST_KANA1',isDevelopment_()?'DEV':'PROD',MASTER_VERSION,session.role,cacheDigest].join(':');
   const cached = cacheGetLargeJson_(cache, cacheKey);
   if (cached) return cached;
   const profiles = getRowsAsObjects_('StudentProfiles');
@@ -26299,6 +26299,8 @@ function getAdminStudentList_(session, filters) {
       .map(row => row.studentUpdatedAt).filter(Boolean).sort().pop() || '';
     return {
       ...profile,
+      kana: getAdminStudentKana_(studentId),
+      furigana: getAdminStudentKana_(studentId),
       overallRate: targetIds.length ? doneSet.size / targetIds.length : null,
       targetCount: targetIds.length,
       completedCount: doneSet.size,
@@ -27541,4 +27543,21 @@ function resetDevelopmentTestUnitData_(studentId, unitIds) {
     const sheet = getSheet_(sheetName);
     rows.forEach(rowNumber => sheet.deleteRow(rowNumber));
   });
+}
+
+let adminStudentKanaMap_ = null;
+
+function getAdminStudentKana_(studentId) {
+  if (!adminStudentKanaMap_) {
+    const master = SpreadsheetApp.openById(getRequiredProperty_(PROP.STUDENT_MASTER_SS_ID));
+    const sheet = master.getSheetByName(getRequiredProperty_(PROP.STUDENT_MASTER_SHEET_NAME));
+    if (!sheet) throw new Error('生徒マスタが見つかりません。');
+    const lastRow = sheet.getLastRow();
+    const rows = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 6).getValues() : [];
+    adminStudentKanaMap_ = new Map(rows.map(row => [
+      String(row[0] || '').trim(),
+      String(row[5] || '').trim()
+    ]).filter(entry => entry[0]));
+  }
+  return adminStudentKanaMap_.get(String(studentId || '').trim()) || '';
 }
