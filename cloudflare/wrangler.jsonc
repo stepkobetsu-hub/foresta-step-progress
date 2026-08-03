@@ -9,11 +9,12 @@
     "EMERGENCY_STOP": "false",
     "MIRROR_READ_ENABLED": "true"
   },
+  "observability": {"enabled": true, "head_sampling_rate": 1},
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "step-progress-db",
-      "database_id": "REPLACE_AFTER_D1_CREATION",
+      "database_id": "028f097c-2609-4bf7-9e9b-39b565606941",
       "migrations_dir": "migrations"
     }
   ]
