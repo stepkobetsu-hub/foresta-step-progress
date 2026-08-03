@@ -15,3 +15,13 @@
 Script Propertiesの値、パスワード、セッション秘密鍵、テスト用資格情報はリポジトリへ保存しません。
 
 
+
+
+## Phase 4 isolated dual-write test API
+
+- Project: Cloudflare二重保存検証API【TEST-STUDENT-01専用】
+- Script ID: `1HF1fF9KCF_Cp2pzxlMianFZZrux3hFqXxI0CIXN6llRwL8V-eXs_HMZm`
+- Deployment ID: `AKfycbyby9F8K2I3ZWpC-sL_vsNpOw_VwOSVqfWXayFviWwz44kpUlSTJOfmKHxaqD27AcxTBA`
+- Version: 1 (2026-08-03 20:55 JST)
+- Scope: `TEST-STUDENT-01` only; writes only to the dedicated `Cloudflare同期検証` sheet.
+- The existing development Apps Script project, UI, public URL, and deployment ID above were not changed.
