@@ -46,7 +46,7 @@
 (() => {
   const STUDENT_ID="TEST-STUDENT-01";
   const state={token:"",data:null,pending:new Map(),failed:new Map(),activeRequests:0,waiters:[],chains:new Map(),generations:new Map()};
-  const metrics=[];window.__phase35Metrics=metrics;
+  const metrics=[];window.__phase35Metrics=metrics;document.documentElement.dataset.phase35Metrics="[]";
   const $=id=>document.getElementById(id);
   const esc=value=>String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
   const requestId=()=>crypto.randomUUID().replaceAll("-","_");
@@ -78,7 +78,7 @@
       const payload={...body,expectedVersion:getVersion?getVersion():body.expectedVersion,requestId:id};
       const {data,elapsedMs,network}=await api(path,{method,body:JSON.stringify(payload)});
       merge(data);state.failed.delete(key);const savedAt=performance.now();if(state.generations.get(key)===generation)badge(key,"保存済み "+Math.round(elapsedMs)+"ms","saved");
-      const result={operation,key,domMs,queueMs:requestStartedAt-domReflectedAt,elapsedMs,savedDisplayMs:savedAt-eventStartedAt,network,timestamp:new Date().toISOString()};metrics.push(result);return result;
+      const result={operation,key,domMs,queueMs:requestStartedAt-domReflectedAt,elapsedMs,savedDisplayMs:savedAt-eventStartedAt,network,timestamp:new Date().toISOString()};metrics.push(result);document.documentElement.dataset.phase35Metrics=JSON.stringify(metrics);return result;
     }catch(error){
       if(state.generations.get(key)===generation)rollback();
       const retry=()=>saveOptimistic({key,path,method,body,getVersion,apply,rollback,merge,eventStartedAt:performance.now(),operation});
