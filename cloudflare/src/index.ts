@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 1.8 seconds
-Output:
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -258,52 +255,58 @@ const handleRead = async (env: Env, studentId: string, resource: Resource | "sum
   const student = await env.DB.prepare(q.student.sql).bind(studentId).first();
   if (!student) return json({ error: "STUDENT_NOT_FOUND" }, 404);
   const result = await runList(env, q[resource]);
-  return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.durationMs }, source: "cloudflare-d1-phase3-test-write" });
-};
-
-type SyncQueueRow = {
-  sync_id: string; student_id: string; operation_type: string; record_id: string;
-  payload: string; request_id: string; attempt_count: number; status: string;
-  google_status: string; google_version: number; google_updated_at: string | null;
-  lock_token: string | null; locked_at: string | null; batch_id: string | null;
-};
-
-const syncOperation = (entity: string, action: string) => {
-  if (entity === "progress") return "PROGRESS_SAVE";
-  if (entity === "targets") return "TARGET_RANGE_SAVE";
-  if (action === "dates") return "HOMEWORK_DATE_SAVE";
-  if (action === "archive") return "HOMEWORK_ARCHIVE";
-  return "HOMEWORK_RESTORE";
-};
-
-const syncRecordState = (operationType: string, payload: Record<string, unknown>) =>
-  operationType === "HOMEWORK_ARCHIVE" ? "ARCHIVED" :
-  operationType === "HOMEWORK_RESTORE" ? "ACTIVE" : String(payload.status || "ACTIVE");
-
-const postGoogleBatch = async (env: Env, batchId: string, rows: SyncQueueRow[]) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort("GOOGLE_TIMEOUT"), 30_000);
-  try {
-    const response = await fetch(env.GOOGLE_DUAL_WRITE_URL, {
-      method: "POST",
-      headers: { "content-type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        action: "batchWrite", token: env.GOOGLE_DUAL_WRITE_TOKEN, batchId,
-        operations: rows.map((row) => ({
-          syncId: row.sync_id, studentId: row.student_id, operationType: row.operation_type,
-          recordId: row.record_id, payload: JSON.parse(row.payload), requestId: row.request_id,
-          recordState: syncRecordState(row.operation_type, JSON.parse(row.payload)),
-        })),
-      }),
-      signal: controller.signal,
-    });
-    const result: unknown = await response.json();
-    if (!isRecord(result) || !Array.isArray(result.results)) {
+  return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.dura…1012 tokens truncated…rted,true);
+    if (!isRecord(result) || result.serviceVersion !== "phase46-v2" || !Array.isArray(result.results)) {
       const code = isRecord(result) ? String(result.code || "GOOGLE_REJECTED") : "GOOGLE_INVALID_RESPONSE";
       throw new Error(code);
     }
     return result;
   } finally { clearTimeout(timeout); }
+};
+
+const postGoogleRead = async (env: Env, rows: SyncQueueRow[]) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("GOOGLE_READ_TIMEOUT"), 30_000);
+  try {
+    const started = performance.now();
+    const response = await fetch(env.GOOGLE_DUAL_WRITE_URL, {
+      method: "POST", headers: { "content-type": "text/plain;charset=utf-8" }, signal: controller.signal,
+      body: JSON.stringify({ action:"batchRead", token:env.GOOGLE_DUAL_WRITE_TOKEN,
+        studentId:env.TEST_STUDENT_ID, requestIds:rows.map(row=>row.request_id) }),
+    });
+    const result: unknown = await readUpstreamJson(response,started,false);
+    if (!isRecord(result) || result.serviceVersion !== "phase46-v2" || !Array.isArray(result.rows)) throw new Error("GOOGLE_READ_INVALID_VERSION");
+    return result.rows.filter(isRecord);
+  } finally { clearTimeout(timeout); }
+};
+
+const handleGoogleSchema = async (env: Env) => {
+  const started=performance.now();
+  const response=await fetch(env.GOOGLE_DUAL_WRITE_URL,{method:"POST",headers:{"content-type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"schema",token:env.GOOGLE_DUAL_WRITE_TOKEN})});
+  const result:unknown=await readUpstreamJson(response,started,false);
+  const expected=["sync_id","student_id","operation_type","record_id","payload","request_id","attempt_count","last_error","next_retry_at","status","created_at","updated_at","version","record_state"];
+  if(!isRecord(result)||result.serviceVersion!=="phase46-v2"||result.success!==true||Number(result.columnCount)!==14||!Array.isArray(result.headers)||!sameJson(result.headers,expected)||!Array.isArray(result.blanks)||result.blanks.length||!Array.isArray(result.duplicates)||result.duplicates.length||result.namesAndOrderMatch!==true) return json({ok:false,error:"SCHEMA_MISMATCH"},409);
+  return json({ok:true,serviceVersion:result.serviceVersion,headers:result.headers});
+};
+
+const stable = (value: unknown): unknown => Array.isArray(value) ? value.map(stable) : isRecord(value)
+  ? Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])) : value;
+const sameJson = (left: unknown,right: unknown) => JSON.stringify(stable(left))===JSON.stringify(stable(right));
+const reconcileBatch = async (env: Env, rows: SyncQueueRow[]) => {
+  const googleRows=await postGoogleRead(env,rows); const grouped=new Map<string,Record<string,unknown>[]>();
+  for(const googleRow of googleRows){const key=String(googleRow.request_id||""); grouped.set(key,[...(grouped.get(key)||[]),googleRow]);}
+  return rows.map(row=>{const matches=grouped.get(row.request_id)||[]; const google=matches[0]; const payload=JSON.parse(row.payload); const fields:string[]=[];
+    if(matches.length>1) fields.push("duplicate");
+    if(!google) fields.push("missing"); else {
+      if(String(google.student_id)!==row.student_id)fields.push("student_id");
+      if(String(google.operation_type)!==row.operation_type)fields.push("operation_type");
+      if(String(google.record_id)!==row.record_id)fields.push("record_id");
+      if(String(google.request_id)!==row.request_id)fields.push("request_id");
+      if(!sameJson(google.payload,payload))fields.push("payload");
+      if(String(google.record_state)!==syncRecordState(row.operation_type,payload))fields.push("record_state");
+    }
+    return {row,google,fields,ok:fields.length===0};
+  });
 };
 
 type GoogleBatchResult = { requestId?: unknown; ok?: unknown; version?: unknown; updatedAt?: unknown; error?: unknown };
@@ -332,6 +335,32 @@ const failBatch = async (env: Env, batchId: string, rows: SyncQueueRow[], messag
   await env.DB.prepare("UPDATE sync_batches SET failed_count=?,duration_ms=?,status='FAILED',last_error=?,completed_at=datetime('now') WHERE batch_id=?").bind(rows.length,elapsed,message.slice(0,500),batchId).run();
 };
 
+const recordUnknownBatch = async (env: Env, batchId: string, rows: SyncQueueRow[], error: UpstreamResponseError, elapsed: number) => {
+  await env.DB.batch(rows.map(row=>env.DB.prepare("UPDATE sync_queue SET attempt_count=attempt_count+1,last_error=?,next_retry_at=NULL,status='UPSTREAM_RESULT_UNKNOWN',google_status='UNKNOWN',lock_token=NULL,locked_at=NULL,sync_duration_ms=?,reconciliation_status='PENDING',updated_at=datetime('now') WHERE sync_id=?")
+    .bind(error.meta.code,elapsed,row.sync_id)));
+  await env.DB.prepare("UPDATE sync_batches SET failed_count=?,duration_ms=?,status='UPSTREAM_RESULT_UNKNOWN',last_error=?,upstream_error_code=?,upstream_http_status=?,upstream_content_type=?,upstream_url_category=?,upstream_redirected=?,upstream_response_ms=?,upstream_body_summary=?,completed_at=datetime('now') WHERE batch_id=?")
+    .bind(rows.length,elapsed,error.meta.code,error.meta.code,error.meta.httpStatus,error.meta.contentType,error.meta.urlCategory,error.meta.redirected?1:0,error.meta.responseMs,error.meta.bodySummary,batchId).run();
+};
+
+const reconcileUnknown = async (env: Env) => {
+  const unknown=await env.DB.prepare("SELECT * FROM sync_queue WHERE status='UPSTREAM_RESULT_UNKNOWN' ORDER BY rowid LIMIT 25").all<SyncQueueRow>();
+  if(!unknown.results.length)return 0;
+  let checked;
+  try{checked=await reconcileBatch(env,unknown.results);}catch{return unknown.results.length;}
+  await env.DB.batch(checked.map(item=>{
+    const resultStatus=item.fields.includes("duplicate")?"DUPLICATE_IN_GOOGLE":item.fields.includes("missing")?"NOT_FOUND_IN_GOOGLE":item.ok?"RECONCILED_SAVED":"RECONCILIATION_MISMATCH";
+    const queueStatus=item.ok?"SAVED":item.fields.includes("missing")?"RETRY_WAIT":"FAILED";
+    return env.DB.prepare("UPDATE sync_queue SET status=?,google_status=?,last_error=?,next_retry_at=CASE WHEN ?='RETRY_WAIT' THEN datetime('now','+2 seconds') ELSE NULL END,reconciliation_status=?,updated_at=datetime('now') WHERE sync_id=?")
+      .bind(queueStatus,item.ok?"SAVED":"ERROR",item.ok?"UPSTREAM_RESULT_UNKNOWN_RECONCILED":resultStatus,queueStatus,item.ok?"MATCHED":"ERROR",item.row.sync_id);
+  }));
+  await env.DB.batch(checked.map(item=>{
+    const resultStatus=item.fields.includes("duplicate")?"DUPLICATE_IN_GOOGLE":item.fields.includes("missing")?"NOT_FOUND_IN_GOOGLE":item.ok?"RECONCILED_SAVED":"RECONCILIATION_MISMATCH";
+    return env.DB.prepare("INSERT OR REPLACE INTO reconciliation_results(reconciliation_id,test_run_id,sync_id,student_id,operation_type,record_id,request_id,status,mismatch_fields,d1_value,google_value) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(crypto.randomUUID(),item.row.test_run_id,item.row.sync_id,item.row.student_id,item.row.operation_type,item.row.record_id,item.row.request_id,resultStatus,JSON.stringify(item.fields),JSON.stringify(JSON.parse(item.row.payload)),JSON.stringify(item.google||null));
+  }));
+  return unknown.results.length;
+};
+
 const processOneBatch = async (env: Env) => {
   const claimed = await claimBatch(env);
   if (!claimed) return 0;
@@ -341,25 +370,32 @@ const processOneBatch = async (env: Env) => {
     const elapsed = Number((performance.now()-started).toFixed(3));
     const results = (google.results as GoogleBatchResult[]);
     const byRequest = new Map(results.map((result) => [String(result.requestId || ""),result]));
+    const writeFailures=claimed.rows.filter(row=>byRequest.get(row.request_id)?.ok!==true);
+    const reconciliation=writeFailures.length ? [] : await reconcileBatch(env,claimed.rows);
+    const reconciliationByRequest=new Map(reconciliation.map(item=>[item.row.request_id,item]));
     let saved = 0; let failed = 0;
     await env.DB.batch(claimed.rows.map((row) => {
       const result = byRequest.get(row.request_id);
       const attempt = Number(row.attempt_count || 0)+1;
-      if (result?.ok === true) {
+      const checked=reconciliationByRequest.get(row.request_id);
+      if (result?.ok === true && checked?.ok === true) {
         saved += 1;
         return env.DB.prepare("UPDATE sync_queue SET attempt_count=?,last_error='',next_retry_at=NULL,status='SAVED',google_status='SAVED',google_version=?,google_updated_at=?,lock_token=NULL,locked_at=NULL,sync_duration_ms=(julianday('now')-julianday(created_at))*86400000,reconciliation_status='MATCHED',updated_at=datetime('now') WHERE sync_id=?")
           .bind(attempt,Number(result.version || 0),String(result.updatedAt || new Date().toISOString()),row.sync_id);
       }
       failed += 1;
       const terminal=attempt>=3;
+      const mismatch=checked && !checked.ok;
       return env.DB.prepare("UPDATE sync_queue SET attempt_count=?,last_error=?,next_retry_at=datetime('now',?),status=?,google_status='ERROR',lock_token=NULL,locked_at=NULL,sync_duration_ms=(julianday('now')-julianday(created_at))*86400000,reconciliation_status='ERROR',updated_at=datetime('now') WHERE sync_id=?")
-        .bind(attempt,String(result?.error || "MISSING_BATCH_RESULT").slice(0,500),`+${2 ** attempt} seconds`,terminal?"FAILED":"RETRY_WAIT",row.sync_id);
+        .bind(attempt,String(mismatch?`RECONCILIATION_ERROR:${checked.fields.join(',')}`:result?.error || "MISSING_BATCH_RESULT").slice(0,500),`+${2 ** attempt} seconds`,mismatch||terminal?"FAILED":"RETRY_WAIT",row.sync_id);
     }));
+    if(reconciliation.length) await env.DB.batch(reconciliation.map(item=>env.DB.prepare("INSERT OR REPLACE INTO reconciliation_results(reconciliation_id,test_run_id,sync_id,student_id,operation_type,record_id,request_id,status,mismatch_fields,d1_value,google_value) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(crypto.randomUUID(),item.row.test_run_id,item.row.sync_id,item.row.student_id,item.row.operation_type,item.row.record_id,item.row.request_id,item.ok?"MATCHED":"RECONCILIATION_ERROR",JSON.stringify(item.fields),JSON.stringify(JSON.parse(item.row.payload)),JSON.stringify(item.google||null))));
     await env.DB.prepare("UPDATE sync_batches SET saved_count=?,failed_count=?,apps_script_ms=?,duration_ms=?,status=?,completed_at=datetime('now') WHERE batch_id=?").bind(saved,failed,elapsed,elapsed,failed?"PARTIAL":"SAVED",claimed.batchId).run();
     return claimed.rows.length;
   } catch (error) {
     const elapsed=Number((performance.now()-started).toFixed(3));
-    await failBatch(env,claimed.batchId,claimed.rows,error instanceof Error?error.message:"GOOGLE_SYNC_ERROR",elapsed);
+    if(error instanceof UpstreamResponseError) await recordUnknownBatch(env,claimed.batchId,claimed.rows,error,elapsed);
+    else await failBatch(env,claimed.batchId,claimed.rows,error instanceof Error?error.message:"GOOGLE_SYNC_ERROR",elapsed);
     return claimed.rows.length;
   }
 };
@@ -368,13 +404,15 @@ const dualWrite = async (request: { json<T>(): Promise<T> }, response: Response,
   if (!response.ok || String(env.DUAL_WRITE_ENABLED) !== "true") return response;
   const [requestBody, responseBody] = await Promise.all([request.json<Record<string, unknown>>(), response.clone().json<Record<string, unknown>>()]);
   const requestId = String(requestBody.requestId || "");
+  const testRunId = String(requestBody.testRunId || "").trim() || null;
+  if (testRunId && !/^[A-Za-z0-9:_-]{8,128}$/.test(testRunId)) return json({error:"INVALID_TEST_RUN_ID"},400);
   const payload = (responseBody.progress || responseBody.homework || responseBody.target) as Record<string, unknown> | undefined;
   if (!requestId || !payload) return response;
   const operationType = syncOperation(entity, action);
   const syncId = crypto.randomUUID();
   await measured(trace, "syncQueue", async () => env.DB.prepare(
-    "INSERT OR IGNORE INTO sync_queue (sync_id,student_id,operation_type,record_id,payload,request_id,status,cloudflare_status,google_status) VALUES (?,?,?,?,?,?,'PENDING','SAVED','PENDING')"
-  ).bind(syncId, studentId, operationType, entityId, JSON.stringify(payload), requestId).run());
+    "INSERT OR IGNORE INTO sync_queue (sync_id,student_id,operation_type,record_id,payload,request_id,test_run_id,status,cloudflare_status,google_status) VALUES (?,?,?,?,?,?,?,'PENDING','SAVED','PENDING')"
+  ).bind(syncId, studentId, operationType, entityId, JSON.stringify(payload), requestId, testRunId).run());
   const row = await env.DB.prepare("SELECT * FROM sync_queue WHERE request_id=?").bind(requestId).first<SyncQueueRow>();
   if (!row) return json({ ...responseBody, sync: { status: "SYNC_ERROR", error: "QUEUE_INSERT_FAILED" } }, 207);
   if (row.status === "SAVED") return json({ ...responseBody, sync: { syncId: row.sync_id, status: "SAVED", replayed: true } });
@@ -389,6 +427,7 @@ const handleSyncStatus = async (env: Env, syncId: string) => {
 
 const runDueSyncs = async (env: Env) => {
   if (String(env.DUAL_WRITE_ENABLED) !== "true") return;
+  await reconcileUnknown(env);
   for (let batch=0;batch<2;batch+=1) if ((await processOneBatch(env))===0) break;
 };
 
@@ -419,6 +458,7 @@ export default {
       if (!(await measured(trace, "auth", () => authorize(request, env)))) return withTrace(json({ error: "UNAUTHORIZED" }, 401), trace);
 
       if (request.method === "GET" && url.pathname === "/admin/sync/status") return withTrace(await handleSyncMetrics(env), trace);
+      if (request.method === "GET" && url.pathname === "/admin/sync/schema") return withTrace(await handleGoogleSchema(env), trace);
 
       const syncMatch = url.pathname.match(/^\/sync\/([^/]+)$/);
       if (request.method === "GET" && syncMatch) return withTrace(await handleSyncStatus(env, decodeURIComponent(syncMatch[1])), trace);
