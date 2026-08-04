@@ -255,9 +255,7 @@ const handleRead = async (env: Env, studentId: string, resource: Resource | "sum
   const student = await env.DB.prepare(q.student.sql).bind(studentId).first();
   if (!student) return json({ error: "STUDENT_NOT_FOUND" }, 404);
   const result = await runList(env, q[resource]);
-  return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.dura…1012 tokens truncated…rted,true);
-    if (!isRecord(result) || result.serviceVersion !== "phase46-v2" || !Array.isArray(result.results)) {
-      const code = isRecord(result) ? String(result.code || "GOOGLE_REJECTED") : "GOOGLE_INVALID_RESPONSE";
+  return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.dura…1068 tokens truncated…;
       throw new Error(code);
     }
     return result;
@@ -427,6 +425,10 @@ const handleSyncStatus = async (env: Env, syncId: string) => {
 
 const runDueSyncs = async (env: Env) => {
   if (String(env.DUAL_WRITE_ENABLED) !== "true") return;
+  const processingControl = await env.DB.prepare(
+    "SELECT status FROM sync_status WHERE sync_key='PHASE46_GOOGLE_QUEUE_PROCESSING'"
+  ).first<{ status: string }>();
+  if (processingControl?.status === "PAUSED") return;
   await reconcileUnknown(env);
   for (let batch=0;batch<2;batch+=1) if ((await processOneBatch(env))===0) break;
 };
