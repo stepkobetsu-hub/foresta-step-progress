@@ -2,6 +2,7 @@ interface Env {
   MIRROR_COMPARE_TOKEN: string;
   GOOGLE_DUAL_WRITE_TOKEN: string;
   GOOGLE_DUAL_WRITE_URL: string;
+  GOOGLE_API_URL: string;
   DUAL_WRITE_ENABLED: string;
   SYNC_BATCH_SIZE: string;
 }

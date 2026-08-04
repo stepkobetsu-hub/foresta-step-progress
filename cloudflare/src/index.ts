@@ -1,4 +1,5 @@
 import { buildDashboardSummary } from "./summary.ts";
+import { buildV83Dashboard } from "./dashboard.ts";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -108,6 +109,60 @@ const readBundle = async (env: Env, studentId: string) => {
     timing: { d1QueryMs, totalMs: Number((performance.now() - startedAt).toFixed(3)) },
     source: "cloudflare-d1-phase3-test-write",
   };
+};
+
+const readDashboard = async (env: Env, studentId: string) => {
+  const bundle = await readBundle(env, studentId);
+  if (!bundle) return null;
+  const student = bundle.student as Record<string, unknown>;
+  const selectableResult = await env.DB.prepare(
+    `SELECT u.unit_id,u.subject,u.grade,u.unit_order,u.unit_type,u.title AS unit_title,u.has_lct,
+            m.series,m.active
+       FROM units u JOIN materials m ON m.material_id=u.material_id
+      WHERE m.active=1 AND (u.grade='' OR u.grade=? OR m.grade='' OR m.grade=?)
+      ORDER BY u.subject,m.series,u.unit_order,u.unit_id`
+  ).bind(String(student.grade || ""), String(student.grade || "")).all();
+  return buildV83Dashboard(
+    student,
+    bundle.targets,
+    bundle.progress,
+    bundle.homework,
+    selectableResult.results.filter(isRecord),
+  );
+};
+
+const proxyGoogleRpc = async (env: Env, body: Record<string, unknown>) => {
+  const response = await fetch(env.GOOGLE_API_URL, {
+    method: "POST",
+    headers: { "content-type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(body),
+    redirect: "follow",
+  });
+  return new Response(response.body, {
+    status: response.status,
+    headers: { ...JSON_HEADERS, "x-data-source": "google-v83" },
+  });
+};
+
+const handleBrowserRpc = async (request: Request, env: Env, trace: Trace) => {
+  const body = await measured(trace, "body", () => parseBody(request));
+  if (String(body.action || "") !== "getStudentDashboard") return proxyGoogleRpc(env, body);
+
+  // Validate the existing Google session before returning private D1 data.
+  const sessionResponse = await measured(trace, "session", () => fetch(env.GOOGLE_API_URL, {
+    method: "POST",
+    headers: { "content-type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ action: "getSession", token: body.token }),
+    redirect: "follow",
+  }));
+  const sessionValue: unknown = await sessionResponse.json();
+  if (!isRecord(sessionValue) || sessionValue.success !== true) return json(sessionValue, sessionResponse.status);
+  const role = String(sessionValue.role || "");
+  const studentId = role === "STUDENT" ? String(sessionValue.userId || "") : String(body.studentId || "");
+  if (!studentId) return json({ success: false, error: "生徒情報が見つかりません。" }, 400);
+  const dashboard = await measured(trace, "d1Dashboard", () => readDashboard(env, studentId));
+  if (!dashboard) return proxyGoogleRpc(env, body);
+  return json({ success: true, data: dashboard, source: "cloudflare-d1" }, 200, { "x-data-source": "cloudflare-d1" });
 };
 
 const writeDenied = (env: Env, studentId: string) =>
@@ -551,6 +606,9 @@ export default {
           dualWriteEnabled: String(env.DUAL_WRITE_ENABLED) === "true",
           testStudentId: env.TEST_STUDENT_ID,
         }, disabled(env) ? 503 : 200);
+      }
+      if (url.pathname === "/api" && request.method === "POST") {
+        return withTrace(await handleBrowserRpc(request, env, trace), trace);
       }
       if (disabled(env)) return json({ error: "SERVICE_DISABLED" }, 503);
       if (!(await measured(trace, "auth", () => authorize(request, env)))) return withTrace(json({ error: "UNAUTHORIZED" }, 401), trace);

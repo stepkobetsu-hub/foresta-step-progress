@@ -10,6 +10,7 @@
     "DUAL_WRITE_ENABLED": "true",
     "SYNC_BATCH_SIZE": "25",
     "GOOGLE_DUAL_WRITE_URL": "https://script.google.com/macros/s/AKfycbyby9F8K2I3ZWpC-sL_vsNpOw_VwOSVqfWXayFviWwz44kpUlSTJOfmKHxaqD27AcxTBA/exec",
+    "GOOGLE_API_URL": "https://script.google.com/macros/s/AKfycbwu8lfhiH3_7m4ogHNtbgeo3ehx_VBMnt1mPXsvIlL_kMSpxFdrRD4rO_I6q_JUXIWHmg/exec",
     "TEST_STUDENT_ID": "TEST-STUDENT-01",
     "ADMIN_API_ENABLED": "false",
     "EMERGENCY_STOP": "false",
@@ -19,7 +20,7 @@
   "triggers": {"crons": ["* * * * *"]},
   "assets": {
     "directory": "./public",
-    "run_worker_first": ["/health", "/students/*", "/sync/*", "/admin/sync/*"]
+    "run_worker_first": ["/api", "/health", "/students/*", "/sync/*", "/admin/sync/*"]
   },
   "d1_databases": [
     {
