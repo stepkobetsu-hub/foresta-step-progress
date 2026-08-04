@@ -1,3 +1,5 @@
+import { buildDashboardSummary } from "./summary.ts";
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -62,9 +64,9 @@ const authorize = async (request: Request, env: Env) => {
 const querySet = (studentId: string) => ({
   student: envSql("SELECT s.student_id, s.display_name, p.campus, s.school, s.grade, s.status, s.source_updated_at, s.updated_at, s.version FROM students s LEFT JOIN student_profiles p ON p.student_id = s.student_id WHERE s.student_id = ?", studentId),
   materials: envSql("SELECT DISTINCT m.material_id, m.series, m.subject, m.grade, m.title, m.has_lct, m.active, m.updated_at, m.version FROM materials m JOIN student_targets t ON t.material_id = m.material_id WHERE t.student_id = ? AND t.included = 1 ORDER BY m.subject, m.material_id", studentId),
-  targets: envSql("SELECT t.target_id, t.material_id, t.subject, t.target_start AS unit_id, t.target_end, t.target_period, t.included, t.updated_at, t.version, u.unit_order, u.unit_type, u.title AS unit_title FROM student_targets t LEFT JOIN units u ON u.unit_id = t.target_start WHERE t.student_id = ? ORDER BY t.subject, u.unit_order, t.target_id", studentId),
+  targets: envSql("SELECT t.target_id, t.material_id, t.subject, t.target_start AS unit_id, t.target_end, t.target_period, t.included, t.updated_at, t.version, u.unit_order, u.unit_type, u.title AS unit_title, u.has_lct, m.series FROM student_targets t LEFT JOIN units u ON u.unit_id = t.target_start LEFT JOIN materials m ON m.material_id = u.material_id WHERE t.student_id = ? ORDER BY t.subject, u.unit_order, t.target_id", studentId),
   progress: envSql("SELECT p.record_id, p.material_id, p.subject, p.grade, p.unit_id, p.round, p.point_confirmed, p.warmup_confirmed, p.try_completed, p.memorization_completed, p.exercise_completed, p.lct_result, p.learning_date, p.updated_at, p.version, u.title AS unit_title, u.unit_order FROM progress_records p LEFT JOIN units u ON u.unit_id = p.unit_id WHERE p.student_id = ? ORDER BY p.subject, u.unit_order, p.round", studentId),
-  homework: envSql("SELECT h.homework_id, h.material_id, h.subject, h.unit_id, h.assigned_date, h.due_date, h.completed_date, h.correction_date, h.review_date, h.archived_at, h.restored_at, h.status, h.updated_at, h.version, u.title AS unit_title, u.unit_order FROM homework_records h LEFT JOIN units u ON u.unit_id = h.unit_id WHERE h.student_id = ? ORDER BY h.updated_at DESC, h.homework_id", studentId),
+  homework: envSql("SELECT h.homework_id, h.material_id, h.subject, h.unit_id, h.assigned_date, h.due_date, h.completed_date, h.correction_date, h.review_date, h.archived_at, h.restored_at, h.status, h.updated_at, h.version, u.title AS unit_title, u.unit_order, CASE WHEN EXISTS (SELECT 1 FROM homework_archives a WHERE a.homework_id = h.homework_id AND a.student_id = h.student_id AND a.restored_at IS NULL) THEN 1 ELSE 0 END AS is_archived FROM homework_records h LEFT JOIN units u ON u.unit_id = h.unit_id WHERE h.student_id = ? ORDER BY h.updated_at DESC, h.homework_id", studentId),
 });
 
 type BoundSql = { sql: string; value: string };
@@ -75,17 +77,6 @@ const runList = async (env: Env, bound: BoundSql) => {
   const startedAt = performance.now();
   const result = await env.DB.prepare(bound.sql).bind(bound.value).all();
   return { rows: result.results, durationMs: Number((performance.now() - startedAt).toFixed(3)) };
-};
-
-const buildSummary = (targets: Record<string, unknown>[], progress: Record<string, unknown>[], homework: Record<string, unknown>[]) => {
-  const includedTargets = targets.filter((row) => Number(row.included) === 1);
-  const completedCount = progress.filter((row) => Number(row.try_completed) === 1).length;
-  return {
-    targetCount: includedTargets.length,
-    completedCount,
-    progressRate: includedTargets.length ? completedCount / includedTargets.length : null,
-    uninputCount: homework.filter((row) => String(row.status).startsWith("UNINPUT|")).length,
-  };
 };
 
 const readBundle = async (env: Env, studentId: string) => {
@@ -113,7 +104,7 @@ const readBundle = async (env: Env, studentId: string) => {
     targets,
     progress,
     homework,
-    summary: buildSummary(targets, progress, homework),
+    summary: buildDashboardSummary(targets, progress, homework),
     timing: { d1QueryMs, totalMs: Number((performance.now() - startedAt).toFixed(3)) },
     source: "cloudflare-d1-phase3-test-write",
   };
@@ -255,7 +246,111 @@ const handleRead = async (env: Env, studentId: string, resource: Resource | "sum
   const student = await env.DB.prepare(q.student.sql).bind(studentId).first();
   if (!student) return json({ error: "STUDENT_NOT_FOUND" }, 404);
   const result = await runList(env, q[resource]);
-  return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.dura…1068 tokens truncated…;
+  return json({ studentId, [resource]: result.rows, timing: { d1QueryMs: result.durationMs }, source: "cloudflare-d1-phase3-test-write" });
+};
+
+type SyncQueueRow = {
+  sync_id: string; student_id: string; operation_type: string; record_id: string;
+  payload: string; request_id: string; attempt_count: number; status: string;
+  google_status: string; google_version: number; google_updated_at: string | null;
+  lock_token: string | null; locked_at: string | null; batch_id: string | null;
+  test_run_id: string | null;
+};
+
+const syncOperation = (entity: string, action: string) => {
+  if (entity === "progress") return "PROGRESS_SAVE";
+  if (entity === "targets") return "TARGET_RANGE_SAVE";
+  if (action === "dates") return "HOMEWORK_DATE_SAVE";
+  if (action === "archive") return "HOMEWORK_ARCHIVE";
+  return "HOMEWORK_RESTORE";
+};
+
+const syncRecordState = (operationType: string, payload: Record<string, unknown>) =>
+  operationType === "HOMEWORK_ARCHIVE" ? "ARCHIVED" :
+  operationType === "HOMEWORK_RESTORE" ? "ACTIVE" : String(payload.status || "ACTIVE");
+
+type UpstreamErrorMeta = {
+  code: string;
+  httpStatus: number;
+  contentType: string;
+  urlCategory: string;
+  redirected: boolean;
+  responseMs: number;
+  bodySummary: string;
+};
+
+class UpstreamResponseError extends Error {
+  meta: UpstreamErrorMeta;
+  constructor(meta: UpstreamErrorMeta) {
+    super(meta.code);
+    this.name = "UpstreamResponseError";
+    this.meta = meta;
+  }
+}
+
+const upstreamUrlCategory = (response: Response) => {
+  try {
+    const host = new URL(response.url).hostname;
+    if (host === "script.google.com" || host === "script.googleusercontent.com") return "GOOGLE_APPS_SCRIPT";
+    if (host.endsWith(".google.com") || host.endsWith(".googleusercontent.com")) return "GOOGLE_OTHER";
+    return "OTHER";
+  } catch { return "UNKNOWN"; }
+};
+
+const readUpstreamJson = async (response: Response, startedAt: number, allowRedirect: boolean) => {
+  const contentType = response.headers.get("content-type") || "";
+  const body = await response.text();
+  const responseMs = Number((performance.now() - startedAt).toFixed(3));
+  const redirected = response.redirected;
+  const code = !response.ok ? "GOOGLE_HTTP_ERROR" :
+    (!allowRedirect && redirected) ? "GOOGLE_UNEXPECTED_REDIRECT" :
+    !contentType.toLowerCase().includes("application/json") ? "GOOGLE_NON_JSON_RESPONSE" : "";
+  if (code) {
+    throw new UpstreamResponseError({
+      code,
+      httpStatus: response.status,
+      contentType: contentType.slice(0, 100),
+      urlCategory: upstreamUrlCategory(response),
+      redirected,
+      responseMs,
+      bodySummary: body.replace(/\s+/g, " ").slice(0, 200),
+    });
+  }
+  try { return JSON.parse(body) as unknown; }
+  catch {
+    throw new UpstreamResponseError({
+      code: "GOOGLE_INVALID_JSON",
+      httpStatus: response.status,
+      contentType: contentType.slice(0, 100),
+      urlCategory: upstreamUrlCategory(response),
+      redirected,
+      responseMs,
+      bodySummary: body.replace(/\s+/g, " ").slice(0, 200),
+    });
+  }
+};
+
+const postGoogleBatch = async (env: Env, batchId: string, rows: SyncQueueRow[]) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("GOOGLE_TIMEOUT"), 30_000);
+  try {
+    const started = performance.now();
+    const response = await fetch(env.GOOGLE_DUAL_WRITE_URL, {
+      method: "POST",
+      headers: { "content-type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action: "batchWrite", token: env.GOOGLE_DUAL_WRITE_TOKEN, batchId,
+        operations: rows.map((row) => ({
+          syncId: row.sync_id, studentId: row.student_id, operationType: row.operation_type,
+          recordId: row.record_id, payload: JSON.parse(row.payload), requestId: row.request_id,
+          recordState: syncRecordState(row.operation_type, JSON.parse(row.payload)),
+        })),
+      }),
+      signal: controller.signal,
+    });
+    const result: unknown = await readUpstreamJson(response, started, true);
+    if (!isRecord(result) || result.serviceVersion !== "phase46-v2" || !Array.isArray(result.results)) {
+      const code = isRecord(result) ? String(result.code || "GOOGLE_REJECTED") : "GOOGLE_INVALID_RESPONSE";
       throw new Error(code);
     }
     return result;
@@ -400,7 +495,8 @@ const processOneBatch = async (env: Env) => {
 
 const dualWrite = async (request: { json<T>(): Promise<T> }, response: Response, env: Env, ctx: ExecutionContext, studentId: string, entity: string, entityId: string, action: string, trace: Trace) => {
   if (!response.ok || String(env.DUAL_WRITE_ENABLED) !== "true") return response;
-  const [requestBody, responseBody] = await Promise.all([request.json<Record<string, unknown>>(), response.clone().json<Record<string, unknown>>()]);
+  const [requestBody, responseBodyValue] = await Promise.all([request.json<Record<string, unknown>>(), response.clone().json()]);
+  const responseBody = responseBodyValue as Record<string, unknown>;
   const requestId = String(requestBody.requestId || "");
   const testRunId = String(requestBody.testRunId || "").trim() || null;
   if (testRunId && !/^[A-Za-z0-9:_-]{8,128}$/.test(testRunId)) return json({error:"INVALID_TEST_RUN_ID"},400);

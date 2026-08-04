@@ -1,11 +1,9 @@
-Exit code: 0
-Wall time: 0.9 seconds
-Output:
 {
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022", "WebWorker"],
     "types": ["node"],
     "strict": true,
