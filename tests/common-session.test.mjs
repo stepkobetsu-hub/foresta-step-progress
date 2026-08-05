@@ -17,7 +17,24 @@ test('student login persists only the revocable common token', () => {
 test('an existing common token resumes without credentials', () => {
   assert.match(page, /readCommonSession_\(\)/);
   assert.match(page, /action:'getCommonStudentSession',token:common\.token/);
+  assert.match(page, /expiresAt:verified\.expiresAt\|\|common\.expiresAt/);
+  assert.match(page, /saveCommonSession_\(common\.token,saved\.expiresAt\)/);
   assert.match(page, /saveStoredSession_\(saved,false\)/);
+});
+
+test('student sessions persist until explicit logout while staff keeps the shorter limit', () => {
+  assert.match(gas, /const STUDENT_SESSION_EXPIRES_AT = '9999-12-31T23:59:59\.999Z'/);
+  assert.match(gas, /String\(userType\) === 'STUDENT'[\s\S]*new Date\(STUDENT_SESSION_EXPIRES_AT\)[\s\S]*SESSION_HOURS/);
+  assert.match(gas, /function makeStudentSessionPersistent_\(tokenHash, row\)/);
+  assert.match(gas, /updateObjectRow_\('Sessions', storedRow\._rowNumber, \{expiresAt: STUDENT_SESSION_EXPIRES_AT\}\)/);
+  assert.match(gas, /function logout_\(token\)[\s\S]*revokedAt: nowIso_\(\)/);
+});
+
+test('persistent student sessions still require an active enrollment', () => {
+  assert.match(gas, /function requireActiveStudentSession_\(session\)/);
+  assert.match(gas, /lookup\.record\.status !== 'ACTIVE'/);
+  assert.match(gas, /'STUDENT_INACTIVE'/);
+  assert.match(gas, /requireActiveStudentSession_\(verifiedSession\)/);
 });
 
 test('common student session always wins over a remembered staff session', () => {
