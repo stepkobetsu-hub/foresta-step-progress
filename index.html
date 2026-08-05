@@ -238,7 +238,7 @@
   const PERSISTED_SESSION_KEY='forestaProgress.rememberedSession';
   const COMMON_TOKEN_KEY='stepCommonStudentSessionToken';
   const COMMON_EXPIRES_KEY='stepCommonStudentSessionExpiresAt';
-  function readCommonSession_(){try{const token=localStorage.getItem(COMMON_TOKEN_KEY)||'',expiresAt=localStorage.getItem(COMMON_EXPIRES_KEY)||'';return token&&expiresAt&&new Date(expiresAt).getTime()>Date.now()?{token,expiresAt}:null}catch(error){return null}}
+  function readCommonSession_(){try{const token=localStorage.getItem(COMMON_TOKEN_KEY)||'',expiresAt=localStorage.getItem(COMMON_EXPIRES_KEY)||'';return token?{token,expiresAt}:null}catch(error){return null}}
   function saveCommonSession_(token,expiresAt){try{localStorage.setItem(COMMON_TOKEN_KEY,String(token||''));localStorage.setItem(COMMON_EXPIRES_KEY,String(expiresAt||''))}catch(error){}}
   function clearCommonSession_(){try{localStorage.removeItem(COMMON_TOKEN_KEY);localStorage.removeItem(COMMON_EXPIRES_KEY)}catch(error){}}
   function saveStoredSession_(value,persist){const json=JSON.stringify(value);sessionStorage.setItem('fsSession',json);try{if(persist)localStorage.setItem(PERSISTED_SESSION_KEY,json);else localStorage.removeItem(PERSISTED_SESSION_KEY)}catch(error){}}
@@ -691,7 +691,8 @@
       if(common){
         const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:30000});
         if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');
-        saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};
+        saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:verified.expiresAt||common.expiresAt};
+        saveCommonSession_(common.token,saved.expiresAt);
         clearStoredSession_();
         saveStoredSession_(saved,false);
       }else saved=readStoredSession_();
