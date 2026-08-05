@@ -3,6 +3,9 @@
 const APP_NAME = '学習進捗管理';
 const MASTER_VERSION = '2026FS';
 const SESSION_HOURS = 8;
+// 生徒は端末で明示的にログアウトするまで共通ログインを維持する。
+// ID・パスワードは保存せず、サーバー側で取り消せるトークンだけを保持する。
+const STUDENT_SESSION_EXPIRES_AT = '9999-12-31T23:59:59.999Z';
 const STUDENT_AUTH_CACHE_SECONDS = 600;
 const STUDENT_AUTH_NOT_FOUND_SECONDS = 120;
 const STUDENT_AUTH_CACHE_VERSION_KEY = 'FS:AUTH:VERSION';
@@ -24335,7 +24338,9 @@ function createSession_(userType, userId, role, permissionLevel) {
   let stageStartedAt = Date.now();
   const rawToken = Utilities.getUuid() + '-' + Utilities.getUuid();
   const issuedAt = new Date();
-  const expiresAt = new Date(issuedAt.getTime() + SESSION_HOURS * 60 * 60 * 1000);
+  const expiresAt = String(userType) === 'STUDENT'
+    ? new Date(STUDENT_SESSION_EXPIRES_AT)
+    : new Date(issuedAt.getTime() + SESSION_HOURS * 60 * 60 * 1000);
   timing.tokenGenerateMs = Date.now() - stageStartedAt;
   stageStartedAt = Date.now();
   const tokenHash = hashToken_(rawToken);
@@ -24384,6 +24389,26 @@ function cacheSessionRow_(row) {
   );
 }
 
+function makeStudentSessionPersistent_(tokenHash, row) {
+  if (!row || String(row.userType) !== 'STUDENT' || String(row.role) !== ROLE.STUDENT) return row;
+  if (String(row.expiresAt) === STUDENT_SESSION_EXPIRES_AT) return row;
+  const storedRow = row._rowNumber ? row : getFirstRowByFieldValue_('Sessions', 'tokenHash', tokenHash);
+  if (!storedRow || storedRow.revokedAt || new Date(storedRow.expiresAt).getTime() <= Date.now()) return row;
+  updateObjectRow_('Sessions', storedRow._rowNumber, {expiresAt: STUDENT_SESSION_EXPIRES_AT});
+  const persistentRow = Object.assign({}, storedRow, {expiresAt: STUDENT_SESSION_EXPIRES_AT});
+  cacheSessionRow_(persistentRow);
+  return persistentRow;
+}
+
+function requireActiveStudentSession_(session) {
+  if (!session || session.role !== ROLE.STUDENT || session.userType !== 'STUDENT') return;
+  if (isDevelopment_() && /^TEST-STUDENT-(0[12])$/.test(String(session.userId || ''))) return;
+  const lookup = getStudentAuthRecord_(session.userId);
+  if (!lookup.record || lookup.record.status !== 'ACTIVE') {
+    throw publicError_('退塾・休塾等のためログインできません。教室へお問い合わせください。', 'STUDENT_INACTIVE');
+  }
+}
+
 function verifySession_(token) {
   const startedAt = Date.now();
   if (!token) throw publicError_('ログインが必要です。', 'UNAUTHENTICATED');
@@ -24402,14 +24427,18 @@ function verifySession_(token) {
     cache.remove(cacheKey);
     throw publicError_('セッションの有効期限が切れました。再度ログインしてください。', 'SESSION_EXPIRED');
   }
-  if (!cacheHit) cacheSessionRow_(row);
-  perfTrace_('session.verify', startedAt, {cacheHit});
-  return {
+  row = makeStudentSessionPersistent_(hash, row);
+  if (!cacheHit || String(row.expiresAt) === STUDENT_SESSION_EXPIRES_AT) cacheSessionRow_(row);
+  const verifiedSession = {
     userType: String(row.userType),
     userId: String(row.userId),
     role: String(row.role),
-    permissionLevel: String(row.permissionLevel || '')
+    permissionLevel: String(row.permissionLevel || ''),
+    expiresAt: String(row.expiresAt || '')
   };
+  requireActiveStudentSession_(verifiedSession);
+  perfTrace_('session.verify', startedAt, {cacheHit});
+  return verifiedSession;
 }
 
 function logout_(token) {
@@ -26631,9 +26660,9 @@ function routePublicApi_(action, input) {
 function routeAuthenticatedApi_(action, input, session) {
   switch (action) {
     case 'getSession':
-      return {success: true, userId: session.userId, role: session.role, permissionLevel: session.permissionLevel};
+      return {success: true, userId: session.userId, role: session.role, permissionLevel: session.permissionLevel, expiresAt: session.expiresAt};
     case 'getCommonStudentSession':
-      return {success: true, profile: getCommonStudentProfile_(session), role: ROLE.STUDENT};
+      return {success: true, profile: getCommonStudentProfile_(session), role: ROLE.STUDENT, expiresAt: session.expiresAt};
     case 'commonGradeRequest':
       return commonGradeRequest_(session, input);
     case 'getStudentDashboard':
