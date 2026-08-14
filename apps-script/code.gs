@@ -26679,6 +26679,10 @@ function routeAuthenticatedApi_(action, input, session) {
       return saveForestaTargetScores_(session, input);
     case 'getForestaStudent':
       return {success: true, data: getForestaStudent_(session, input.studentId)};
+    case 'getForestaScores':
+      return getForestaScores_(session, input.studentId);
+    case 'saveForestaScoreCorrection':
+      return saveForestaScoreCorrection_(session, input);
     case 'saveForestaLesson':
       return saveForestaLesson_(session, input);
     case 'getStudentInputHistory':
