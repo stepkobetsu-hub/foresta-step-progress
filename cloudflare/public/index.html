@@ -4,7 +4,7 @@
   <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>学習進捗管理</title>
+  <title>ステップ＆ゴール進捗管理</title>
   <style>
     :root{--ink:#16233c;--muted:#68758a;--line:#dfe5ed;--bg:#f3f6fa;--navy:#19315d;--blue:#2b6fc7;--green:#168269;--red:#ba4150;--amber:#a76312}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}.hidden{display:none!important}
@@ -145,7 +145,7 @@
 </head>
 <body>
   <section id="login" class="login">
-    <div class="hero"><div class="logo">FS</div><p>個別指導STEP｜自主学習サポート</p><h1>学習進捗管理</h1><p>教材ごとの学習単元と宿題を記録し、教室と進み具合を共有します。</p></div>
+    <div class="hero"><div class="logo">FS</div><p>個別指導STEP｜自主学習サポート</p><h1>ステップ＆ゴール進捗管理</h1><p>教材ごとの学習単元と宿題を記録し、教室と進み具合を共有します。</p></div>
     <div class="loginPane"><form id="loginForm" class="card loginCard">
       <div class="tabs"><button type="button" id="studentTab" class="active">生徒</button><button type="button" id="staffTab">講師・管理者</button></div>
       <h2 id="loginTitle">生徒ログイン</h2>
@@ -162,7 +162,7 @@
     </form></div>
   </section>
   <section id="application" class="hidden">
-    <header class="top"><div class="brand"><div class="logo">FS</div><span>学習進捗管理</span></div><div class="topActions"><span id="who" class="muted"></span><button id="logout">ログアウト</button></div></header>
+    <header class="top"><div class="brand"><div class="logo">FS</div><span>ステップ＆ゴール進捗管理</span></div><div class="topActions"><span id="who" class="muted"></span><button id="logout">ログアウト</button></div></header>
     <main id="main"></main>
     <button id="globalSave" class="globalSave hidden" type="button">すべて保存済み</button>
   </section>
@@ -309,7 +309,7 @@
   };
   $('logout').onclick=()=>{const button=$('logout');if(button.disabled||state.loggingOut)return;button.disabled=true;const token=state.token,role=state.role,hadPendingSaves=hasPendingSaves_();if(hadPendingSaves)saveNow_();state.loggingOut=true;state.lifecycleId+=1;abortPendingReads_();cancelPendingWork_();clearStudentViewCache_();clearStoredSession_();if(role==='STUDENT')clearCommonSession_();state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;state.studentLandingPending=false;state.unitQueues.clear();state.targetQueue=null;state.pendingSaves=0;$('who').textContent='';$('main').replaceChildren();$('application').classList.add('hidden');$('login').classList.remove('hidden');restoreRememberedLogin_(state.loginType);button.disabled=false;const finishServerLogout=()=>{if(!token)return;void rpc({action:'logout',token},{attempts:1,timeoutMs:15000,allowDuringLogout:true}).catch(()=>{})};setTimeout(finishServerLogout,hadPendingSaves?2500:0)};
   function confirmLogout_(){return new Promise(resolve=>{const old=$('logoutConfirm');if(old)old.remove();const modal=document.createElement('div');modal.id='logoutConfirm';modal.className='logoutConfirm';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-labelledby','logoutConfirmTitle');modal.innerHTML='<div class="logoutConfirmCard"><h2 id="logoutConfirmTitle">ログアウトしますか？</h2><p>保存済みの内容はそのまま残ります。</p><div class="logoutConfirmActions"><button type="button" class="logoutCancel">キャンセル</button><button type="button" class="logoutProceed">ログアウト</button></div></div>';const finish=value=>{modal.remove();resolve(value)};modal.querySelector('.logoutCancel').onclick=()=>finish(false);modal.querySelector('.logoutProceed').onclick=()=>finish(true);modal.onclick=event=>{if(event.target===modal)finish(false)};document.body.appendChild(modal);modal.querySelector('.logoutCancel').focus()})}
-  function renderStudentShell_(){const name=esc(state.profile?.name||'');$('main').innerHTML=`<div class="studentWelcome"><div><p class="eyebrow">学習進捗管理</p><h1>${name}さん</h1><div class="muted">必要なデータから順に読み込んでいます</div></div></div><div class="viewTabs"><button class="active">📚 次回の宿題</button><button>✏️ 進捗入力</button><button>🎯 目標範囲</button></div><section class="card panel"><div class="panelHead"><h2>宿題チェック</h2><span class="badge">読込中…</span></div><div class="unitList"><div class="unit">宿題を読み込んでいます…</div><div class="unit">画面はこのまま操作できます</div></div></section>`}
+  function renderStudentShell_(){const name=esc(state.profile?.name||'');$('main').innerHTML=`<div class="studentWelcome"><div><p class="eyebrow">ステップ＆ゴール進捗管理</p><h1>${name}さん</h1><div class="muted">必要なデータから順に読み込んでいます</div></div></div><div class="viewTabs"><button class="active">📚 次回の宿題</button><button>✏️ 進捗入力</button><button>🎯 目標範囲</button></div><section class="card panel"><div class="panelHead"><h2>宿題チェック</h2><span class="badge">読込中…</span></div><div class="unitList"><div class="unit">宿題を読み込んでいます…</div><div class="unit">画面はこのまま操作できます</div></div></section>`}
   async function showApp(){if(state.loggingOut)return;$('login').classList.add('hidden');$('application').classList.remove('hidden');$('who').textContent=state.profile?.name||'';if(state.role==='STUDENT')renderStudentShell_();else $('main').innerHTML='<section class="card panel"><div class="empty"><p>データを読み込んでいます…</p></div></section>';try{if(state.role==='STUDENT')await renderStudent();else if(state.role==='TEACHER')await renderTeacher();else await renderAdmin()}catch(error){renderLoadError(error)}}
   function renderLoadError(error){
     if(state.loggingOut)return;
