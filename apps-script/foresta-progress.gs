@@ -252,8 +252,9 @@ function getForestaAdminDashboard_(session) {
     const nextTest = forestaNextTest_(student, setting);
     const pace = forestaPace_(units, setting, latest, student, nextTest);
     const position = forestaStatus_(units, setting, latest, student);
+    const kana = getAdminStudentKana_(student.studentId);
     return {
-      studentId: String(student.studentId), name: student.name, campus: student.campus, grade: student.grade, school: student.school,
+      studentId: String(student.studentId), name: student.name, kana, furigana: kana, campus: student.campus, grade: student.grade, school: student.school,
       subject, status: position.status, homeworkCompleted: latest && latest.homeworkCompleted || '', ctResult: latest && latest.ctResult || '',
       todayRecorded: !!(latest && String(latest.lessonDate) === today), todayProgressedUnits: latest && String(latest.lessonDate) === today ? Number(latest.progressedUnits || 0) : 0,
       remainingUnits: pace.remainingUnits, remainingLessons: pace.remainingLessons, requiredPerLesson: pace.requiredPerLesson,

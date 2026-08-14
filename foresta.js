@@ -6,6 +6,43 @@ const STAFF_SESSION_KEY='forestaStaffSession';
 const state={token:'',role:'',profile:null,dashboard:null,admin:null,student:null,filters:{query:'',campus:'',status:''}};
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+function normalizeStudentSearch_(value){return String(value||'').normalize('NFKC').toLowerCase().replace(/[ァ-ヶ]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0x60)).replace(/[\s　]+/g,'')}
+const ROMAJI_PAIRS_={
+  'きゃ':'kya','きゅ':'kyu','きょ':'kyo','ぎゃ':'gya','ぎゅ':'gyu','ぎょ':'gyo',
+  'しゃ':'sha','しゅ':'shu','しょ':'sho','じゃ':'ja','じゅ':'ju','じょ':'jo',
+  'ちゃ':'cha','ちゅ':'chu','ちょ':'cho','ぢゃ':'ja','ぢゅ':'ju','ぢょ':'jo',
+  'にゃ':'nya','にゅ':'nyu','にょ':'nyo','ひゃ':'hya','ひゅ':'hyu','ひょ':'hyo',
+  'びゃ':'bya','びゅ':'byu','びょ':'byo','ぴゃ':'pya','ぴゅ':'pyu','ぴょ':'pyo',
+  'みゃ':'mya','みゅ':'myu','みょ':'myo','りゃ':'rya','りゅ':'ryu','りょ':'ryo',
+  'うぃ':'wi','うぇ':'we','うぉ':'wo','ゔぁ':'va','ゔぃ':'vi','ゔぇ':'ve','ゔぉ':'vo',
+  'ふぁ':'fa','ふぃ':'fi','ふぇ':'fe','ふぉ':'fo','しぇ':'she','じぇ':'je','ちぇ':'che',
+  'てぃ':'ti','でぃ':'di','とぅ':'tu','どぅ':'du','つぁ':'tsa','つぃ':'tsi','つぇ':'tse','つぉ':'tso'
+};
+const ROMAJI_CHARS_={
+  'あ':'a','い':'i','う':'u','え':'e','お':'o','か':'ka','き':'ki','く':'ku','け':'ke','こ':'ko',
+  'が':'ga','ぎ':'gi','ぐ':'gu','げ':'ge','ご':'go','さ':'sa','し':'shi','す':'su','せ':'se','そ':'so',
+  'ざ':'za','じ':'ji','ず':'zu','ぜ':'ze','ぞ':'zo','た':'ta','ち':'chi','つ':'tsu','て':'te','と':'to',
+  'だ':'da','ぢ':'ji','づ':'zu','で':'de','ど':'do','な':'na','に':'ni','ぬ':'nu','ね':'ne','の':'no',
+  'は':'ha','ひ':'hi','ふ':'fu','へ':'he','ほ':'ho','ば':'ba','び':'bi','ぶ':'bu','べ':'be','ぼ':'bo',
+  'ぱ':'pa','ぴ':'pi','ぷ':'pu','ぺ':'pe','ぽ':'po','ま':'ma','み':'mi','む':'mu','め':'me','も':'mo',
+  'や':'ya','ゆ':'yu','よ':'yo','ら':'ra','り':'ri','る':'ru','れ':'re','ろ':'ro','わ':'wa','を':'o',
+  'ん':'n','ゔ':'vu','ぁ':'a','ぃ':'i','ぅ':'u','ぇ':'e','ぉ':'o','ゎ':'wa'
+};
+function kanaToRomaji_(value){
+  const kana=normalizeStudentSearch_(value);
+  let out='',smallTsu=false;
+  for(let i=0;i<kana.length;i++){
+    const ch=kana[i];
+    if(ch==='っ'){smallTsu=true;continue}
+    if(ch==='ー'){const vowel=(out.match(/[aeiou]$/)||[])[0];if(vowel)out+=vowel;continue}
+    const pair=ROMAJI_PAIRS_[kana.slice(i,i+2)];
+    let roma=pair||ROMAJI_CHARS_[ch]||ch;
+    if(pair)i++;
+    if(smallTsu){if(roma.startsWith('ch'))out+='t';else if(/^[bcdfghjklmpqrstvwxyz]/.test(roma))out+=roma[0];smallTsu=false}
+    out+=roma;
+  }
+  return out;
+}
 
 async function api(action,payload={}){
   const response=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...payload,action,token:state.token}),cache:'no-store',redirect:'follow'});
@@ -36,13 +73,16 @@ function renderStudent(){const d=state.dashboard||{},subject=d.subject||'数学'
   <div class="stack"><section class="panel"><div class="panel-head"><div><span class="eyebrow">CLEAR TEST</span><h2>次回クリアテスト</h2></div>${ctPill(latest.ctResult)}</div><p><b>${esc(latest.nextCtCode||'今回進んだ範囲から先生が1単元選びます')}</b></p><p class="help">◎ 全問正解　〇 1問間違い　× 2問以上間違い（特訓部屋）</p></section><section class="panel"><div class="panel-head"><div><span class="eyebrow">SCORE HISTORY</span><h2>定期テスト履歴</h2></div></div><div class="table-wrap"><table class="score-table"><thead><tr><th>テスト</th><th>英</th><th>数</th><th>5科</th><th>順位</th></tr></thead><tbody>${scoreRows(d.scores)}</tbody></table></div></section></div></div>`}
 
 async function loadAdmin(){renderLoading('本日の進捗一覧を読み込んでいます…');const out=await api('getForestaAdminDashboard');state.admin=out;renderAdmin()}
-function filteredStudents(){const q=state.filters.query.toLowerCase();return (state.admin?.students||[]).filter(s=>(!q||[s.name,s.studentId,s.school].some(v=>String(v||'').toLowerCase().includes(q)))&&(!state.filters.campus||s.campus===state.filters.campus)&&(!state.filters.status||s.status===state.filters.status))}
-function renderAdmin(){const all=state.admin?.students||[],list=filteredStudents(),campuses=[...new Set(all.map(x=>x.campus).filter(Boolean))];$('sessionName').textContent=(state.profile?.name||'管理者')+'さん';$('logoutButton').classList.remove('hidden');$('app').innerHTML=`
+function filteredStudents(){const q=normalizeStudentSearch_(state.filters.query);return (state.admin?.students||[]).filter(s=>{const kana=s.kana||s.furigana||'';const values=[s.studentId,s.name,kana,s.school].map(normalizeStudentSearch_);values.push(kanaToRomaji_(kana));return(!q||values.some(v=>v.includes(q)))&&(!state.filters.campus||s.campus===state.filters.campus)&&(!state.filters.status||s.status===state.filters.status)})}
+function adminStudentRowsHtml_(){const list=filteredStudents();return list.map(s=>`<tr data-student-id="${esc(s.studentId)}"><td class="student-cell"><b>${esc(s.name)}</b><small>${esc(s.grade)}｜${esc(s.school||'学校未登録')}</small></td><td>${esc(s.campus)}</td><td>${esc(s.subject||'—')}</td><td>${statusPill(s.status)}</td><td>${s.homeworkCompleted==='YES'?'<span class="status-pill status-ahead">実施</span>':'<span class="status-pill status-warning">要確認</span>'}</td><td>${ctPill(s.ctResult)}</td><td>${esc(s.todayProgressedUnits??0)}単元</td><td>${esc(s.remainingUnits??'—')}単元</td><td>${esc(s.remainingLessons??'—')}回</td><td><b>${esc(s.requiredPerLesson??'—')}単元/回</b></td><td>${esc(s.instructorName||'未入力')}</td></tr>`).join('')||'<tr><td colspan="11" class="empty">条件に合う生徒はいません</td></tr>'}
+function bindAdminStudentRows_(){document.querySelectorAll('[data-student-id]').forEach(row=>row.onclick=()=>openStudent(row.dataset.studentId))}
+function refreshAdminStudentRows_(){$('adminStudentRows').innerHTML=adminStudentRowsHtml_();bindAdminStudentRows_()}
+function renderAdmin(){const all=state.admin?.students||[],campuses=[...new Set(all.map(x=>x.campus).filter(Boolean))];$('sessionName').textContent=(state.profile?.name||'管理者')+'さん';$('logoutButton').classList.remove('hidden');$('app').innerHTML=`
   <div class="page-head"><div><span class="eyebrow">TODAY OVERVIEW</span><h1>本日の進捗状況</h1><p>学校進度・宿題・CT・必要ペースを優先順で確認します。</p></div><span class="date-chip">${todayLabel()}</span></div>
   <div class="summary-grid"><div class="summary-card"><span>在籍生</span><strong>${all.length}名</strong><small>英語・数学</small></div><div class="summary-card alert"><span>学校進度アラーム</span><strong>${all.filter(x=>['BEHIND','AT_SCHOOL'].includes(x.status)).length}名</strong><small>学校より先になっていない</small></div><div class="summary-card"><span>CT不合格</span><strong>${all.filter(x=>x.ctResult==='×').length}名</strong><small>特訓部屋の連絡対象</small></div><div class="summary-card"><span>本日未入力</span><strong>${all.filter(x=>!x.todayRecorded).length}名</strong><small>授業後に入力</small></div></div>
-  <div class="toolbar"><input id="studentSearch" value="${esc(state.filters.query)}" placeholder="生徒名・ID・学校で検索"><select id="campusFilter"><option value="">すべての教室</option>${campuses.map(v=>`<option ${state.filters.campus===v?'selected':''}>${esc(v)}</option>`).join('')}</select><select id="statusFilter"><option value="">すべての状況</option><option value="BEHIND" ${state.filters.status==='BEHIND'?'selected':''}>学校より遅れ</option><option value="AT_SCHOOL" ${state.filters.status==='AT_SCHOOL'?'selected':''}>学校と同じ</option><option value="AHEAD" ${state.filters.status==='AHEAD'?'selected':''}>学校より先</option><option value="NO_DATA" ${state.filters.status==='NO_DATA'?'selected':''}>未入力</option></select><button id="refreshButton" class="action-button">更新</button></div>
-  <section class="panel table-wrap"><table class="progress-table"><thead><tr><th>生徒</th><th>教室</th><th>科目</th><th>学校との位置</th><th>宿題</th><th>CT</th><th>本日</th><th>予想範囲まで</th><th>残り回数</th><th>必要ペース</th><th>担当</th></tr></thead><tbody>${list.map(s=>`<tr data-student-id="${esc(s.studentId)}"><td class="student-cell"><b>${esc(s.name)}</b><small>${esc(s.grade)}｜${esc(s.school||'学校未登録')}</small></td><td>${esc(s.campus)}</td><td>${esc(s.subject||'—')}</td><td>${statusPill(s.status)}</td><td>${s.homeworkCompleted==='YES'?'<span class="status-pill status-ahead">実施</span>':'<span class="status-pill status-warning">要確認</span>'}</td><td>${ctPill(s.ctResult)}</td><td>${esc(s.todayProgressedUnits??0)}単元</td><td>${esc(s.remainingUnits??'—')}単元</td><td>${esc(s.remainingLessons??'—')}回</td><td><b>${esc(s.requiredPerLesson??'—')}単元/回</b></td><td>${esc(s.instructorName||'未入力')}</td></tr>`).join('')||'<tr><td colspan="11" class="empty">条件に合う生徒はいません</td></tr>'}</tbody></table></section>`;
-  $('studentSearch').oninput=e=>{state.filters.query=e.target.value;renderAdmin()};$('campusFilter').onchange=e=>{state.filters.campus=e.target.value;renderAdmin()};$('statusFilter').onchange=e=>{state.filters.status=e.target.value;renderAdmin()};$('refreshButton').onclick=loadAdmin;document.querySelectorAll('[data-student-id]').forEach(row=>row.onclick=()=>openStudent(row.dataset.studentId));}
+  <div class="toolbar"><input id="studentSearch" value="${esc(state.filters.query)}" placeholder="生徒コード・氏名・フリガナ・ローマ字で検索" autocomplete="off"><select id="campusFilter"><option value="">すべての教室</option>${campuses.map(v=>`<option ${state.filters.campus===v?'selected':''}>${esc(v)}</option>`).join('')}</select><select id="statusFilter"><option value="">すべての状況</option><option value="BEHIND" ${state.filters.status==='BEHIND'?'selected':''}>学校より遅れ</option><option value="AT_SCHOOL" ${state.filters.status==='AT_SCHOOL'?'selected':''}>学校と同じ</option><option value="AHEAD" ${state.filters.status==='AHEAD'?'selected':''}>学校より先</option><option value="NO_DATA" ${state.filters.status==='NO_DATA'?'selected':''}>未入力</option></select><button id="refreshButton" class="action-button">更新</button></div>
+  <section class="panel table-wrap"><table class="progress-table"><thead><tr><th>生徒</th><th>教室</th><th>科目</th><th>学校との位置</th><th>宿題</th><th>CT</th><th>本日</th><th>予想範囲まで</th><th>残り回数</th><th>必要ペース</th><th>担当</th></tr></thead><tbody id="adminStudentRows">${adminStudentRowsHtml_()}</tbody></table></section>`;
+  $('studentSearch').oninput=e=>{state.filters.query=e.target.value;refreshAdminStudentRows_()};$('campusFilter').onchange=e=>{state.filters.campus=e.target.value;refreshAdminStudentRows_()};$('statusFilter').onchange=e=>{state.filters.status=e.target.value;refreshAdminStudentRows_()};$('refreshButton').onclick=loadAdmin;bindAdminStudentRows_()}
 
 async function openStudent(studentId){renderLoading('生徒データを読み込んでいます…');const out=await api('getForestaStudent',{studentId});state.student=out.data;renderAdminStudent()}
 function unitOptions(units,value){return `<option value="">選択してください</option>`+(units||[]).map(u=>`<option value="${esc(u.unitId)}" ${String(u.unitId)===String(value)?'selected':''}>${esc(u.stepCode)} ${esc(u.unitTitle)}${u.skippable?'（省略可）':''}</option>`).join('')}
