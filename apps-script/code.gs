@@ -1,6 +1,6 @@
 
 // ===== Config.gs =====
-const APP_NAME = '学習進捗管理';
+const APP_NAME = 'ステップ＆ゴール進捗管理';
 const MASTER_VERSION = '2026FS';
 const SESSION_HOURS = 8;
 // 生徒は端末で明示的にログアウトするまで共通ログインを維持する。
@@ -26667,6 +26667,14 @@ function routeAuthenticatedApi_(action, input, session) {
       return commonGradeRequest_(session, input);
     case 'getStudentDashboard':
       return {success: true, data: getStudentDashboard_(session, input.studentId)};
+    case 'getForestaDashboard':
+      return {success: true, data: getForestaDashboard_(session)};
+    case 'getForestaAdminDashboard':
+      return getForestaAdminDashboard_(session);
+    case 'getForestaStudent':
+      return {success: true, data: getForestaStudent_(session, input.studentId)};
+    case 'saveForestaLesson':
+      return saveForestaLesson_(session, input);
     case 'getStudentInputHistory':
       return {success: true, history: getStudentInputHistory_(session, input.studentId, input.limit)};
     case 'saveStudentProgress':
