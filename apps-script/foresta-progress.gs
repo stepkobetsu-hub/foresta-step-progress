@@ -5,18 +5,22 @@ const FORESTA_TIMETABLE_SHEET_NAME = '時間割マスタ';
 const FORESTA_SETTINGS_SHEET = 'フォレスタ設定';
 const FORESTA_RANGE_SETTINGS_SHEET = 'フォレスタ学校別予想範囲';
 const FORESTA_LESSONS_SHEET = 'フォレスタ授業記録';
+const FORESTA_HOMEWORK_SHEET = 'フォレスタ宿題状況';
 const FORESTA_SETTINGS_HEADERS = Object.freeze([
   'settingId','studentId','subject','schoolProgressUnitId','predictedRangeEndUnitId',
-  'nextTestDate','updatedAt','updatedBy'
+  'nextTestDate','updatedAt','updatedBy','targetScore'
 ]);
 const FORESTA_LESSONS_HEADERS = Object.freeze([
   'lessonId','studentId','lessonDate','subject','instructorName','schoolProgressUnitId',
   'startUnitId','endUnitId','predictedRangeEndUnitId','homeworkCompleted','ctUnitId',
   'ctResult','progressedUnits','nextCtUnitId','homeworkItemsJson','trainingRequired',
-  'notificationText','memo','createdAt','createdBy'
+  'notificationText','memo','createdAt','createdBy','progressUnitIdsJson','previousHomeworkIdsJson'
 ]);
 const FORESTA_RANGE_SETTINGS_HEADERS = Object.freeze([
   'rangeId','school','grade','subject','predictedRangeStartUnitId','predictedRangeEndUnitId','updatedAt','updatedBy'
+]);
+const FORESTA_HOMEWORK_HEADERS = Object.freeze([
+  'homeworkId','studentId','sourceLessonId','subject','label','completedAt','completedBy','createdAt'
 ]);
 
 function forestaEnsureSheet_(name, headers) {
@@ -133,7 +137,9 @@ function forestaEffectiveSetting_(student, subject, personalSetting, knownRangeR
     effective.predictedRangeEndUnitId = schoolSetting.predictedRangeEndUnitId;
     effective.predictedRangeSource = 'SCHOOL_GRADE';
   } else {
-    effective.predictedRangeSource = personalSetting ? 'STUDENT' : '';
+    effective.predictedRangeStartUnitId = '';
+    effective.predictedRangeEndUnitId = '';
+    effective.predictedRangeSource = '';
   }
   return effective;
 }
@@ -196,12 +202,77 @@ function forestaUnitIndex_(units, unitId) {
   return units.findIndex(unit => String(unit.unitId) === String(unitId || ''));
 }
 
-function forestaPace_(units, setting, latest, student, nextTest) {
+function forestaJsonArray_(value) {
+  if (Array.isArray(value)) return value.map(String);
+  try {
+    const parsed = JSON.parse(String(value || '[]'));
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function forestaLessonProgressIds_(lesson, units) {
+  if (!lesson) return [];
+  const valid = new Set(units.map(unit => String(unit.unitId)));
+  const stored = forestaJsonArray_(lesson.progressUnitIdsJson).filter(id => valid.has(id));
+  if (stored.length) return stored;
+  const start = forestaUnitIndex_(units, lesson.startUnitId);
+  const end = forestaUnitIndex_(units, lesson.endUnitId);
+  if (start >= 0 && end >= start) return units.slice(start, end + 1).map(unit => unit.unitId);
+  return end >= 0 ? [units[end].unitId] : [];
+}
+
+function forestaHighestReachedId_(lessons, units) {
+  let highest = -1;
+  (lessons || []).forEach(lesson => {
+    forestaLessonProgressIds_(lesson, units).forEach(id => {
+      highest = Math.max(highest, forestaUnitIndex_(units, id));
+    });
+  });
+  return highest >= 0 ? units[highest].unitId : '';
+}
+
+function forestaHomework_(studentId) {
+  return forestaRows_(FORESTA_HOMEWORK_SHEET, FORESTA_HOMEWORK_HEADERS)
+    .filter(row => String(row.studentId) === String(studentId));
+}
+
+function forestaHomeworkForLesson_(rows, lessonId) {
+  return (rows || []).filter(row => String(row.sourceLessonId) === String(lessonId || ''))
+    .map(row => ({
+      homeworkId: String(row.homeworkId || ''), label: String(row.label || ''),
+      completedAt: forestaDateText_(row.completedAt), completed: !!row.completedAt
+    }));
+}
+
+function forestaDateText_(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : null;
+  return date && !isNaN(date.getTime()) ? Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy-MM-dd') : String(value);
+}
+
+function forestaLegacyHomeworkItems_(lesson) {
+  if (!lesson) return [];
+  let labels = [];
+  try { labels = JSON.parse(String(lesson.homeworkItemsJson || '[]')); } catch (error) {}
+  return (Array.isArray(labels) ? labels : []).map((item, index) => ({
+    homeworkId: 'legacy:' + lesson.lessonId + ':' + index,
+    label: String(typeof item === 'string' ? item : item.label || item.type || ''),
+    completedAt: '', completed: false
+  })).filter(item => item.label);
+}
+
+function forestaHomeworkForSource_(rows, lesson) {
+  const stored = forestaHomeworkForLesson_(rows, lesson && lesson.lessonId);
+  return stored.length ? stored : forestaLegacyHomeworkItems_(lesson);
+}
+
+function forestaPace_(units, setting, currentUnitId, student, nextTest) {
   const eligible = units.filter(unit => !unit.skippable);
-  const currentId = latest && latest.endUnitId || '';
-  const currentIndex = eligible.findIndex(unit => unit.unitId === currentId);
-  const endIndex = eligible.findIndex(unit => unit.unitId === String(setting && setting.predictedRangeEndUnitId || ''));
-  const remainingUnits = endIndex < 0 ? null : Math.max(0, endIndex - currentIndex);
+  const currentOrder = forestaUnitIndex_(units, currentUnitId);
+  const endOrder = forestaUnitIndex_(units, setting && setting.predictedRangeEndUnitId);
+  const remainingUnits = endOrder < 0 ? null : eligible.filter(unit => unit.order > currentOrder && unit.order <= endOrder).length;
   let remainingLessons = null;
   if (nextTest.date) {
     const deadline = new Date(nextTest.date + 'T00:00:00'); deadline.setDate(deadline.getDate() - 14);
@@ -212,9 +283,9 @@ function forestaPace_(units, setting, latest, student, nextTest) {
   return {remainingUnits, remainingLessons, requiredPerLesson};
 }
 
-function forestaStatus_(units, setting, latest, student) {
+function forestaStatus_(units, setting, currentUnitId, student) {
   const schoolIndex = forestaUnitIndex_(units, setting && setting.schoolProgressUnitId);
-  const currentIndex = forestaUnitIndex_(units, latest && latest.endUnitId);
+  const currentIndex = forestaUnitIndex_(units, currentUnitId);
   const rangeEndIndex = forestaUnitIndex_(units, setting && setting.predictedRangeEndUnitId);
   if (schoolIndex < 0 || currentIndex < 0) return {status: 'NO_DATA', aheadUnits: 0};
   if (rangeEndIndex >= 0 && currentIndex >= rangeEndIndex) return {status: String(student.grade).includes('3') ? 'RANGE_COMPLETE' : 'REPEAT', aheadUnits: currentIndex - schoolIndex};
@@ -223,20 +294,30 @@ function forestaStatus_(units, setting, latest, student) {
   return {status: 'BEHIND', aheadUnits: currentIndex - schoolIndex};
 }
 
-function forestaLessonClient_(row, units) {
+function forestaLessonClient_(row, units, homeworkRows) {
   if (!row) return {};
   const byId = id => units.find(unit => unit.unitId === String(id || '')) || {};
   let homeworkItems = [];
   try { homeworkItems = JSON.parse(String(row.homeworkItemsJson || '[]')); } catch (error) {}
+  const progressUnitIds = forestaLessonProgressIds_(row, units);
+  const progressUnits = progressUnitIds.map(id => byId(id)).filter(unit => unit.unitId);
+  const assignedHomework = forestaHomeworkForSource_(homeworkRows, row);
+  const previousHomeworkIds = forestaJsonArray_(row.previousHomeworkIdsJson);
+  const previousHomeworkItems = (homeworkRows || []).filter(item => previousHomeworkIds.includes(String(item.homeworkId))).map(item => ({
+    homeworkId: String(item.homeworkId), label: String(item.label || ''),
+    completedAt: forestaDateText_(item.completedAt), completed: !!item.completedAt
+  }));
   return Object.assign({}, row, {
     startCode: byId(row.startUnitId).stepCode || '', endCode: byId(row.endUnitId).stepCode || '',
-    nextCtCode: byId(row.nextCtUnitId).stepCode || '', homeworkItems
+    nextCtCode: byId(row.nextCtUnitId).stepCode || '', homeworkItems: assignedHomework.length ? assignedHomework : homeworkItems,
+    progressUnitIds, progressCodes: progressUnits.map(unit => unit.stepCode), previousHomeworkItems
   });
 }
 
 function forestaStudentData_(student, includeInstructors) {
   const levelMap = forestaLevelMap_()[String(student.studentId)] || {english: 3, math: 3};
   const lessons = forestaLessons_(student.studentId);
+  const homeworkRows = forestaHomework_(student.studentId);
   const latestRaw = lessons[0] || null;
   const subject = latestRaw && latestRaw.subject || '数学';
   const unitsBySubject = {
@@ -247,21 +328,35 @@ function forestaStudentData_(student, includeInstructors) {
   const personalSetting = forestaSetting_(student.studentId, subject);
   const setting = forestaEffectiveSetting_(student, subject, personalSetting);
   const nextTest = forestaNextTest_(student, setting);
-  const pace = forestaPace_(units, setting, latestRaw, student, nextTest);
-  const position = forestaStatus_(units, setting, latestRaw, student);
+  const subjectLessons = lessons.filter(row => String(row.subject) === subject);
+  const currentUnitId = forestaHighestReachedId_(subjectLessons, units);
+  const pace = forestaPace_(units, setting, currentUnitId, student, nextTest);
+  const position = forestaStatus_(units, setting, currentUnitId, student);
   const scoreResult = forestaGradeRequest_('getStudentScores', {studentId: student.studentId});
+  const targetScores = {};
+  ['英語','数学'].forEach(item => {
+    const itemSetting = forestaSetting_(student.studentId, item);
+    targetScores[item] = itemSetting && itemSetting.targetScore !== '' ? Number(itemSetting.targetScore) : '';
+  });
+  const previousHomeworkBySubject = {};
+  ['英語','数学'].forEach(item => {
+    const previousLesson = lessons.find(row => String(row.subject) === item) || null;
+    previousHomeworkBySubject[item] = forestaHomeworkForSource_(homeworkRows, previousLesson);
+  });
   return {
     student, subject, level: subject === '英語' ? levelMap.english : levelMap.math,
     units: unitsBySubject['英語'].concat(unitsBySubject['数学']),
-    lessons: lessons.slice(0, 12).map(row => forestaLessonClient_(row, unitsBySubject[row.subject] || units)),
-    latestLesson: forestaLessonClient_(latestRaw, units),
+    lessons: lessons.slice(0, 12).map(row => forestaLessonClient_(row, unitsBySubject[row.subject] || units, homeworkRows)),
+    latestLesson: forestaLessonClient_(latestRaw, units, homeworkRows),
     schoolProgressUnitId: setting && setting.schoolProgressUnitId || '',
     predictedRangeStartUnitId: setting && setting.predictedRangeStartUnitId || '',
     predictedRangeEndUnitId: setting && setting.predictedRangeEndUnitId || '',
     schoolProgressCode: (units[forestaUnitIndex_(units, setting && setting.schoolProgressUnitId)] || {}).stepCode || '',
-    forestaProgressCode: (units[forestaUnitIndex_(units, latestRaw && latestRaw.endUnitId)] || {}).stepCode || '',
+    forestaProgressCode: (units[forestaUnitIndex_(units, currentUnitId)] || {}).stepCode || '',
     nextTest, pace, status: position.status, aheadUnits: position.aheadUnits,
-    scores: scoreResult.scores || [], instructors: includeInstructors ? forestaInstructorsForCampus_(student.campus) : []
+    scores: scoreResult.scores || [], targetScores, previousHomeworkBySubject,
+    gradeManagementUrl: 'https://stepkobetsu-hub.github.io/seiseki-kanri/admin.html#scores',
+    instructors: includeInstructors ? forestaInstructorsForCampus_(student.campus) : []
   };
 }
 
@@ -283,6 +378,7 @@ function getForestaAdminDashboard_(session) {
   const levelMap = forestaLevelMap_();
   const allLessons = forestaRows_(FORESTA_LESSONS_SHEET, FORESTA_LESSONS_HEADERS);
   const settings = forestaRows_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS);
+  const allHomework = forestaRows_(FORESTA_HOMEWORK_SHEET, FORESTA_HOMEWORK_HEADERS);
   const rangeSettings = forestaRangeSettings_();
   const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const rows = students.map(student => {
@@ -292,13 +388,23 @@ function getForestaAdminDashboard_(session) {
     const units = forestaUnitsFor_(student, subject, levelMap[String(student.studentId)] || {english:3,math:3});
     const personalSetting = settings.find(row => String(row.studentId) === String(student.studentId) && String(row.subject) === subject) || null;
     const setting = forestaEffectiveSetting_(student, subject, personalSetting, rangeSettings);
+    const currentUnitId = forestaHighestReachedId_(studentLessons.filter(row => String(row.subject) === subject), units);
     const nextTest = forestaNextTest_(student, setting);
-    const pace = forestaPace_(units, setting, latest, student, nextTest);
-    const position = forestaStatus_(units, setting, latest, student);
+    const pace = forestaPace_(units, setting, currentUnitId, student, nextTest);
+    const position = forestaStatus_(units, setting, currentUnitId, student);
+    const previousHomeworkIds = forestaJsonArray_(latest && latest.previousHomeworkIdsJson);
+    const previousHomework = allHomework.filter(item => previousHomeworkIds.includes(String(item.homeworkId)));
+    const targetScores = {};
+    ['英語','数学'].forEach(item => {
+      const itemSetting = settings.find(row => String(row.studentId) === String(student.studentId) && String(row.subject) === item);
+      targetScores[item] = itemSetting && itemSetting.targetScore !== '' ? Number(itemSetting.targetScore) : '';
+    });
     const kana = getAdminStudentKana_(student.studentId);
     return {
       studentId: String(student.studentId), name: student.name, kana, furigana: kana, campus: student.campus, grade: student.grade, school: student.school,
-      subject, status: position.status, homeworkCompleted: latest && latest.homeworkCompleted || '', ctResult: latest && latest.ctResult || '',
+      subject, status: position.status, homeworkCompleted: latest && latest.homeworkCompleted || '',
+      homeworkIncompleteCount: previousHomework.filter(item => !item.completedAt).length,
+      targetScores, ctResult: latest && latest.ctResult || '',
       todayRecorded: !!(latest && String(latest.lessonDate) === today), todayProgressedUnits: latest && String(latest.lessonDate) === today ? Number(latest.progressedUnits || 0) : 0,
       remainingUnits: pace.remainingUnits, remainingLessons: pace.remainingLessons, requiredPerLesson: pace.requiredPerLesson,
       instructorName: latest && latest.instructorName || ''
@@ -388,6 +494,50 @@ function saveForestaRangeSetting_(session, input) {
   })};
 }
 
+function saveForestaTargetScores_(session, input) {
+  requireRole_(session, [ROLE.STUDENT, ROLE.TEACHER, ROLE.ADMIN]);
+  const studentId = session.role === ROLE.STUDENT
+    ? String(getCommonStudentProfile_(session).studentId || '')
+    : String(input && input.studentId || '').trim();
+  if (!studentId) throw publicError_('生徒情報を確認してください。', 'STUDENT_REQUIRED');
+  const studentExists = getRowsAsObjects_('StudentProfiles').some(row => String(row.studentId) === studentId);
+  if (!studentExists) throw publicError_('生徒情報が見つかりません。', 'STUDENT_NOT_FOUND');
+  const values = {英語: input && input.english, 数学: input && input.math};
+  Object.keys(values).forEach(subject => {
+    const text = String(values[subject] == null ? '' : values[subject]).trim();
+    if (text && (!/^\d+$/.test(text) || Number(text) < 0 || Number(text) > 100)) {
+      throw publicError_('目標点は0〜100点で入力してください。', 'INVALID_TARGET_SCORE');
+    }
+    values[subject] = text === '' ? '' : Number(text);
+  });
+  const rows = forestaRows_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS);
+  const now = nowIso_();
+  Object.keys(values).forEach(subject => {
+    const current = rows.find(row => String(row.studentId) === studentId && String(row.subject) === subject);
+    const next = Object.assign({}, current || {}, {
+      settingId: current && current.settingId || Utilities.getUuid(), studentId, subject,
+      targetScore: values[subject], updatedAt: now, updatedBy: session.userId
+    });
+    if (current) forestaUpdate_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS, current._rowNumber, next);
+    else forestaAppend_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS, next);
+  });
+  writeAudit_(session, 'SAVE_FORESTA_TARGET_SCORES', FORESTA_SETTINGS_SHEET, studentId, null, values);
+  return {success: true, targetScores: values};
+}
+
+function forestaEnsureHomeworkForLesson_(studentId, lesson) {
+  if (!lesson) return [];
+  let rows = forestaHomework_(studentId);
+  let items = forestaHomeworkForLesson_(rows, lesson.lessonId);
+  if (items.length) return rows;
+  const legacyItems = forestaLegacyHomeworkItems_(lesson);
+  legacyItems.forEach(item => forestaAppend_(FORESTA_HOMEWORK_SHEET, FORESTA_HOMEWORK_HEADERS, {
+    homeworkId: item.homeworkId, studentId, sourceLessonId: lesson.lessonId, subject: lesson.subject,
+    label: item.label, completedAt: '', completedBy: '', createdAt: lesson.createdAt || nowIso_()
+  }));
+  return forestaHomework_(studentId);
+}
+
 function saveForestaLesson_(session, input) {
   requireRole_(session, [ROLE.TEACHER, ROLE.ADMIN]);
   const studentId = String(input.studentId || '').trim();
@@ -401,15 +551,19 @@ function saveForestaLesson_(session, input) {
   const levelMap = forestaLevelMap_()[studentId] || {english:3,math:3};
   const units = forestaUnitsFor_(student, subject, levelMap);
   const byId = id => units.find(unit => unit.unitId === String(id || ''));
-  const schoolUnit = byId(input.schoolProgressUnitId), startUnit = byId(input.startUnitId), endUnit = byId(input.endUnitId), rangeEndUnit = byId(input.predictedRangeEndUnitId);
-  if (!schoolUnit || !startUnit || !endUnit || !rangeEndUnit) throw publicError_('学校進度・今回範囲・予想テスト範囲をすべて選択してください。', 'UNIT_REQUIRED');
-  if (startUnit.order > endUnit.order) throw publicError_('今回の開始単元と到達単元の順序を確認してください。', 'INVALID_RANGE');
-  if (!String(student.grade || '').includes('3') && endUnit.order > rangeEndUnit.order) {
+  const schoolUnit = byId(input.schoolProgressUnitId);
+  const progressIdsInput = Array.isArray(input.progressUnitIds) ? input.progressUnitIds : [input.progressUnitIds];
+  const progressUnits = Array.from(new Set(progressIdsInput.map(String).filter(Boolean))).map(byId).filter(Boolean).sort((a,b) => a.order - b.order);
+  const schoolRange = forestaSchoolRangeSetting_(student, subject);
+  const rangeEndUnit = byId(schoolRange && schoolRange.predictedRangeEndUnitId);
+  if (!schoolUnit || !progressUnits.length) throw publicError_('学校進度と今回学習した単元を選択してください。', 'UNIT_REQUIRED');
+  if (!rangeEndUnit) throw publicError_('管理者画面で、この中学校・学年・科目の予想テスト範囲を先に設定してください。', 'SCHOOL_RANGE_REQUIRED');
+  if (!String(student.grade || '').includes('3') && progressUnits.some(unit => unit.order > rangeEndUnit.order)) {
     throw publicError_('中学1・2年生は予想テスト範囲を超えて進めません。範囲内を繰り返してください。', 'TEST_RANGE_LIMIT');
   }
-  const eligibleProgress = units.filter(unit => unit.order >= startUnit.order && unit.order <= endUnit.order && !unit.skippable);
-  const eligibleForCt = eligibleProgress.length ? eligibleProgress : units.filter(unit => unit.order >= startUnit.order && unit.order <= endUnit.order);
-  const nextCt = eligibleForCt[Math.floor((eligibleForCt.length - 1) / 2)] || endUnit;
+  const eligibleProgress = progressUnits.filter(unit => !unit.skippable);
+  const eligibleForCt = eligibleProgress.length ? eligibleProgress : progressUnits;
+  const nextCt = eligibleForCt[Math.floor((eligibleForCt.length - 1) / 2)] || progressUnits[progressUnits.length - 1];
   const ctResult = String(input.ctResult || '').replace('○','〇');
   if (ctResult && !['◎','〇','×'].includes(ctResult)) throw publicError_('CTは◎・〇・×から選択してください。', 'INVALID_CT');
   const now = nowIso_();
@@ -418,26 +572,53 @@ function saveForestaLesson_(session, input) {
   const nextSetting = {
     settingId: currentSetting && currentSetting.settingId || Utilities.getUuid(), studentId, subject,
     schoolProgressUnitId: schoolUnit.unitId, predictedRangeEndUnitId: rangeEndUnit.unitId,
-    nextTestDate: currentSetting && currentSetting.nextTestDate || '', updatedAt: now, updatedBy: session.userId
+    nextTestDate: currentSetting && currentSetting.nextTestDate || '', updatedAt: now, updatedBy: session.userId,
+    targetScore: currentSetting && currentSetting.targetScore !== '' ? currentSetting.targetScore : ''
   };
   if (currentSetting) forestaUpdate_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS, currentSetting._rowNumber, nextSetting);
   else forestaAppend_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS, nextSetting);
-  const homeworkItems = subject === '英語'
+  const baseHomeworkItems = subject === '英語'
     ? ['Key Words「☆日→英」暗記','Exercise「暗記マーク」暗記','TRY赤×直し','Exercise','前回宿題の赤×直し']
     : ['TRY赤×直し','Exercise','前回宿題の赤×直し'];
+  const progressLabel = progressUnits.map(unit => unit.stepCode).filter(Boolean).join('・');
+  const homeworkItems = baseHomeworkItems.map(label => (progressLabel ? progressLabel + '｜' : '') + label);
   const trainingRequired = ctResult === '×';
   const notificationText = trainingRequired
     ? `${student.name}さんのクリアテストが不合格（2問以上不正解）でした。\n理解を確実にするため、特訓部屋で学習のし直しを行います。本日または別日に教室へ来ていただく日時を、改めてご案内します。`
     : '';
+  const lessonDate = String(input.lessonDate || Utilities.formatDate(new Date(),'Asia/Tokyo','yyyy-MM-dd'));
+  const previousLesson = forestaLessons_(studentId).find(row => String(row.subject) === subject) || null;
+  const homeworkRows = forestaEnsureHomeworkForLesson_(studentId, previousLesson);
+  const previousHomework = forestaHomeworkForLesson_(homeworkRows, previousLesson && previousLesson.lessonId);
+  const completedIdsInput = Array.isArray(input.completedHomeworkIds) ? input.completedHomeworkIds : [input.completedHomeworkIds];
+  const completedIds = new Set(completedIdsInput.map(String).filter(Boolean));
+  previousHomework.forEach(item => {
+    const row = homeworkRows.find(value => String(value.homeworkId) === item.homeworkId);
+    if (!row) return;
+    const nextCompletedAt = completedIds.has(item.homeworkId) ? (String(row.completedAt || '') || lessonDate) : '';
+    const nextCompletedBy = nextCompletedAt ? session.userId : '';
+    if (String(row.completedAt || '') !== nextCompletedAt || String(row.completedBy || '') !== String(nextCompletedBy)) {
+      forestaUpdate_(FORESTA_HOMEWORK_SHEET, FORESTA_HOMEWORK_HEADERS, row._rowNumber, Object.assign({}, row, {completedAt: nextCompletedAt, completedBy: nextCompletedBy}));
+    }
+  });
+  const completedCount = previousHomework.filter(item => completedIds.has(item.homeworkId)).length;
+  const homeworkCompleted = previousHomework.length ? (completedCount === previousHomework.length ? 'YES' : completedCount ? 'PARTIAL' : 'NO') : '';
   const lesson = {
-    lessonId: Utilities.getUuid(), studentId, lessonDate: String(input.lessonDate || Utilities.formatDate(new Date(),'Asia/Tokyo','yyyy-MM-dd')),
-    subject, instructorName, schoolProgressUnitId: schoolUnit.unitId, startUnitId: startUnit.unitId, endUnitId: endUnit.unitId,
-    predictedRangeEndUnitId: rangeEndUnit.unitId, homeworkCompleted: String(input.homeworkCompleted || ''),
-    ctUnitId: String(input.ctUnitId || ''), ctResult, progressedUnits: eligibleProgress.length,
+    lessonId: Utilities.getUuid(), studentId, lessonDate,
+    subject, instructorName, schoolProgressUnitId: schoolUnit.unitId,
+    startUnitId: progressUnits[0].unitId, endUnitId: progressUnits[progressUnits.length - 1].unitId,
+    predictedRangeEndUnitId: rangeEndUnit.unitId, homeworkCompleted,
+    ctUnitId: nextCt.unitId, ctResult, progressedUnits: eligibleProgress.length,
     nextCtUnitId: nextCt.unitId, homeworkItemsJson: JSON.stringify(homeworkItems), trainingRequired,
-    notificationText, memo: String(input.memo || '').slice(0,300), createdAt: now, createdBy: session.userId
+    notificationText, memo: String(input.memo || '').slice(0,300), createdAt: now, createdBy: session.userId,
+    progressUnitIdsJson: JSON.stringify(progressUnits.map(unit => unit.unitId)),
+    previousHomeworkIdsJson: JSON.stringify(previousHomework.map(item => item.homeworkId))
   };
   forestaAppend_(FORESTA_LESSONS_SHEET, FORESTA_LESSONS_HEADERS, lesson);
+  homeworkItems.forEach(label => forestaAppend_(FORESTA_HOMEWORK_SHEET, FORESTA_HOMEWORK_HEADERS, {
+    homeworkId: Utilities.getUuid(), studentId, sourceLessonId: lesson.lessonId, subject,
+    label, completedAt: '', completedBy: '', createdAt: now
+  }));
   writeAudit_(session, 'SAVE_FORESTA_LESSON', 'ForestaLessons', lesson.lessonId, null, lesson);
   return {success: true, lessonId: lesson.lessonId, progressedUnits: lesson.progressedUnits, nextCtUnitId: lesson.nextCtUnitId, ctTrainingRequired: trainingRequired, notificationText};
 }

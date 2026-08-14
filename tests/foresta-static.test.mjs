@@ -45,12 +45,32 @@ test('administrator can configure predicted test ranges by school, grade, and su
   assert.match(server, /predictedRangeSource = 'SCHOOL_GRADE'/);
 });
 
-test('lesson form requires school progress, teacher, CT and homework status', () => {
+test('lesson form records checked study units and previous homework items', () => {
   assert.match(js, /name="instructorName" required/);
   assert.match(js, /name="schoolProgressUnitId" required/);
-  assert.match(js, /name="homeworkCompleted"/);
+  assert.match(js, /name="progressUnitIds"/);
+  assert.match(js, /name="completedHomeworkIds"/);
   assert.match(js, /name="ctResult"/);
+  assert.doesNotMatch(js, /今回の開始単元/);
+  assert.doesNotMatch(js, /今回の到達単元/);
+  assert.doesNotMatch(js, /CTで出した単元/);
   assert.match(js, /saveForestaLesson/);
+});
+
+test('target scores and grade-correction link appear for students and administrators', () => {
+  assert.match(js, /今回の目標点と定期テスト履歴/);
+  assert.match(js, /成績を訂正する/);
+  assert.match(js, /saveForestaTargetScores/);
+  assert.match(server, /targetScore/);
+  assert.match(server, /gradeManagementUrl/);
+});
+
+test('homework completion is stored per item with a completion date', () => {
+  assert.match(server, /FORESTA_HOMEWORK_SHEET = 'フォレスタ宿題状況'/);
+  assert.match(server, /completedAt/);
+  assert.match(server, /previousHomeworkIdsJson/);
+  assert.match(server, /completedHomeworkIds/);
+  assert.match(js, /完了日/);
 });
 
 test('subject-specific homework and CT rules are encoded on the server', () => {
@@ -77,7 +97,7 @@ test('score history and school schedules come through the grade system API', () 
 });
 
 test('new authenticated API routes are registered', () => {
-  for (const action of ['getForestaDashboard','getForestaAdminDashboard','getForestaRangeAdminData','saveForestaRangeSetting','getForestaStudent','saveForestaLesson']) {
+  for (const action of ['getForestaDashboard','getForestaAdminDashboard','getForestaRangeAdminData','saveForestaRangeSetting','saveForestaTargetScores','getForestaStudent','saveForestaLesson']) {
     assert.match(api, new RegExp(`case '${action}'`));
   }
 });
