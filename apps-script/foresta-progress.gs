@@ -84,8 +84,10 @@ function forestaInstructorsForCampus_(campus) {
   if (!sheet) return [];
   const rows = sheet.getDataRange().getValues();
   const normalizedCampus = String(campus || '').replace(/校$/, '').trim();
-  return rows.slice(1).map(row => ({name: String(row[1] || '').trim(), campus: String(row[17] || '').trim()}))
-    .filter(item => item.name && (!normalizedCampus || item.campus.split(/[・,、／/]/).map(v => v.replace(/校$/, '').trim()).includes(normalizedCampus)));
+  return rows.slice(1).map(row => ({
+    name: String(row[1] || '').trim(), active: String(row[3] || '').trim() === '1',
+    campus: String(row[17] || '').trim()
+  })).filter(item => item.active && item.name && (!normalizedCampus || item.campus.split(/[・,、／/]/).map(v => v.replace(/校$/, '').trim()).includes(normalizedCampus)));
 }
 
 function forestaUnitsFor_(student, subject, levelMap) {

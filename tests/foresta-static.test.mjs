@@ -57,6 +57,12 @@ test('lesson form records checked study units and previous homework items', () =
   assert.match(js, /saveForestaLesson/);
 });
 
+test('lesson instructor list contains only active staff from column D', () => {
+  assert.match(server, /active: String\(row\[3\] \|\| ''\)\.trim\(\) === '1'/);
+  assert.match(server, /filter\(item => item\.active && item\.name/);
+  assert.match(server, /campus: String\(row\[17\]/);
+});
+
 test('target scores and grade-correction link appear for students and administrators', () => {
   assert.match(js, /今回の目標点と定期テスト履歴/);
   assert.match(js, /成績を訂正する/);
