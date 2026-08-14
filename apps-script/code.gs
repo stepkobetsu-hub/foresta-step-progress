@@ -26671,6 +26671,10 @@ function routeAuthenticatedApi_(action, input, session) {
       return {success: true, data: getForestaDashboard_(session)};
     case 'getForestaAdminDashboard':
       return getForestaAdminDashboard_(session);
+    case 'getForestaRangeAdminData':
+      return getForestaRangeAdminData_(session);
+    case 'saveForestaRangeSetting':
+      return saveForestaRangeSetting_(session, input);
     case 'getForestaStudent':
       return {success: true, data: getForestaStudent_(session, input.studentId)};
     case 'saveForestaLesson':

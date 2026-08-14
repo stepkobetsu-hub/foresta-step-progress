@@ -31,6 +31,20 @@ test('administrator search matches the delivery-system search behavior without l
   assert.match(server, /kana: getAdminStudentKana_|const kana = getAdminStudentKana_/);
 });
 
+test('administrator can configure predicted test ranges by school, grade, and subject', () => {
+  assert.match(js, /予想テスト範囲設定/);
+  assert.match(js, /name="school" required/);
+  assert.match(js, /name="grade"/);
+  assert.match(js, /name="subject"/);
+  assert.match(js, /name="predictedRangeStartUnitId" required/);
+  assert.match(js, /name="predictedRangeEndUnitId" required/);
+  assert.match(js, /saveForestaRangeSetting/);
+  assert.match(server, /FORESTA_RANGE_SETTINGS_SHEET = 'フォレスタ学校別予想範囲'/);
+  assert.match(server, /function getForestaRangeAdminData_/);
+  assert.match(server, /function saveForestaRangeSetting_/);
+  assert.match(server, /predictedRangeSource = 'SCHOOL_GRADE'/);
+});
+
 test('lesson form requires school progress, teacher, CT and homework status', () => {
   assert.match(js, /name="instructorName" required/);
   assert.match(js, /name="schoolProgressUnitId" required/);
@@ -63,7 +77,7 @@ test('score history and school schedules come through the grade system API', () 
 });
 
 test('new authenticated API routes are registered', () => {
-  for (const action of ['getForestaDashboard','getForestaAdminDashboard','getForestaStudent','saveForestaLesson']) {
+  for (const action of ['getForestaDashboard','getForestaAdminDashboard','getForestaRangeAdminData','saveForestaRangeSetting','getForestaStudent','saveForestaLesson']) {
     assert.match(api, new RegExp(`case '${action}'`));
   }
 });

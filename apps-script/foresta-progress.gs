@@ -3,6 +3,7 @@
 const FORESTA_APP_NAME = 'フォレスタ進捗管理';
 const FORESTA_TIMETABLE_SHEET_NAME = '時間割マスタ';
 const FORESTA_SETTINGS_SHEET = 'フォレスタ設定';
+const FORESTA_RANGE_SETTINGS_SHEET = 'フォレスタ学校別予想範囲';
 const FORESTA_LESSONS_SHEET = 'フォレスタ授業記録';
 const FORESTA_SETTINGS_HEADERS = Object.freeze([
   'settingId','studentId','subject','schoolProgressUnitId','predictedRangeEndUnitId',
@@ -13,6 +14,9 @@ const FORESTA_LESSONS_HEADERS = Object.freeze([
   'startUnitId','endUnitId','predictedRangeEndUnitId','homeworkCompleted','ctUnitId',
   'ctResult','progressedUnits','nextCtUnitId','homeworkItemsJson','trainingRequired',
   'notificationText','memo','createdAt','createdBy'
+]);
+const FORESTA_RANGE_SETTINGS_HEADERS = Object.freeze([
+  'rangeId','school','grade','subject','predictedRangeStartUnitId','predictedRangeEndUnitId','updatedAt','updatedBy'
 ]);
 
 function forestaEnsureSheet_(name, headers) {
@@ -97,6 +101,41 @@ function forestaUnitsFor_(student, subject, levelMap) {
 function forestaSetting_(studentId, subject) {
   return forestaRows_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS)
     .find(row => String(row.studentId) === String(studentId) && String(row.subject) === String(subject)) || null;
+}
+
+function forestaJuniorGrade_(value) {
+  const text = String(value || '').normalize('NFKC').trim();
+  if (!text.includes('中')) return '';
+  const match = text.match(/[1-3]/);
+  return match ? '中' + match[0] : '';
+}
+
+function forestaRangeSettings_() {
+  return forestaRows_(FORESTA_RANGE_SETTINGS_SHEET, FORESTA_RANGE_SETTINGS_HEADERS);
+}
+
+function forestaSchoolRangeSetting_(student, subject, knownRows) {
+  const school = String(student && student.school || '').trim();
+  const grade = forestaJuniorGrade_(student && student.grade);
+  return (knownRows || forestaRangeSettings_()).find(row =>
+    String(row.school || '').trim() === school &&
+    forestaJuniorGrade_(row.grade) === grade &&
+    String(row.subject || '').trim() === String(subject || '').trim()
+  ) || null;
+}
+
+function forestaEffectiveSetting_(student, subject, personalSetting, knownRangeRows) {
+  const schoolSetting = forestaSchoolRangeSetting_(student, subject, knownRangeRows);
+  if (!personalSetting && !schoolSetting) return null;
+  const effective = Object.assign({}, schoolSetting || {}, personalSetting || {});
+  if (schoolSetting && schoolSetting.predictedRangeEndUnitId) {
+    effective.predictedRangeStartUnitId = schoolSetting.predictedRangeStartUnitId || '';
+    effective.predictedRangeEndUnitId = schoolSetting.predictedRangeEndUnitId;
+    effective.predictedRangeSource = 'SCHOOL_GRADE';
+  } else {
+    effective.predictedRangeSource = personalSetting ? 'STUDENT' : '';
+  }
+  return effective;
 }
 
 function forestaLessons_(studentId) {
@@ -205,7 +244,8 @@ function forestaStudentData_(student, includeInstructors) {
     '数学': forestaUnitsFor_(student, '数学', levelMap)
   };
   const units = unitsBySubject[subject];
-  const setting = forestaSetting_(student.studentId, subject);
+  const personalSetting = forestaSetting_(student.studentId, subject);
+  const setting = forestaEffectiveSetting_(student, subject, personalSetting);
   const nextTest = forestaNextTest_(student, setting);
   const pace = forestaPace_(units, setting, latestRaw, student, nextTest);
   const position = forestaStatus_(units, setting, latestRaw, student);
@@ -216,6 +256,7 @@ function forestaStudentData_(student, includeInstructors) {
     lessons: lessons.slice(0, 12).map(row => forestaLessonClient_(row, unitsBySubject[row.subject] || units)),
     latestLesson: forestaLessonClient_(latestRaw, units),
     schoolProgressUnitId: setting && setting.schoolProgressUnitId || '',
+    predictedRangeStartUnitId: setting && setting.predictedRangeStartUnitId || '',
     predictedRangeEndUnitId: setting && setting.predictedRangeEndUnitId || '',
     schoolProgressCode: (units[forestaUnitIndex_(units, setting && setting.schoolProgressUnitId)] || {}).stepCode || '',
     forestaProgressCode: (units[forestaUnitIndex_(units, latestRaw && latestRaw.endUnitId)] || {}).stepCode || '',
@@ -242,13 +283,15 @@ function getForestaAdminDashboard_(session) {
   const levelMap = forestaLevelMap_();
   const allLessons = forestaRows_(FORESTA_LESSONS_SHEET, FORESTA_LESSONS_HEADERS);
   const settings = forestaRows_(FORESTA_SETTINGS_SHEET, FORESTA_SETTINGS_HEADERS);
+  const rangeSettings = forestaRangeSettings_();
   const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   const rows = students.map(student => {
     const studentLessons = allLessons.filter(row => String(row.studentId) === String(student.studentId)).sort((a,b) => String(b.lessonDate).localeCompare(String(a.lessonDate)));
     const latest = studentLessons[0] || null;
     const subject = latest && latest.subject || '数学';
     const units = forestaUnitsFor_(student, subject, levelMap[String(student.studentId)] || {english:3,math:3});
-    const setting = settings.find(row => String(row.studentId) === String(student.studentId) && String(row.subject) === subject) || null;
+    const personalSetting = settings.find(row => String(row.studentId) === String(student.studentId) && String(row.subject) === subject) || null;
+    const setting = forestaEffectiveSetting_(student, subject, personalSetting, rangeSettings);
     const nextTest = forestaNextTest_(student, setting);
     const pace = forestaPace_(units, setting, latest, student, nextTest);
     const position = forestaStatus_(units, setting, latest, student);
@@ -264,6 +307,85 @@ function getForestaAdminDashboard_(session) {
   const severity = {BEHIND:0,AT_SCHOOL:1,NO_DATA:2,AHEAD:3,REPEAT:4,RANGE_COMPLETE:5};
   rows.sort((a,b) => (severity[a.status] ?? 9) - (severity[b.status] ?? 9) || String(a.campus).localeCompare(String(b.campus),'ja') || String(a.name).localeCompare(String(b.name),'ja'));
   return {success: true, students: rows, generatedAt: nowIso_()};
+}
+
+function forestaRangeUnitsByGrade_() {
+  const result = {};
+  ['中1','中2','中3'].forEach(grade => {
+    ['英語','数学'].forEach(subject => {
+      result[grade + '|' + subject] = forestaUnitsFor_({grade}, subject, {english: 3, math: 3});
+    });
+  });
+  return result;
+}
+
+function getForestaRangeAdminData_(session) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const profiles = getRowsAsObjects_('StudentProfiles').filter(row =>
+    String(row.enrollmentStatus) === 'ACTIVE' && forestaJuniorGrade_(row.grade) && String(row.school || '').trim()
+  );
+  const schoolNames = new Set(profiles.map(row => String(row.school || '').trim()));
+  forestaSchools_().forEach(row => {
+    const name = String(row && row.name || '').trim();
+    if (name) schoolNames.add(name);
+  });
+  const schools = Array.from(schoolNames).sort((a,b) => a.localeCompare(b, 'ja')).map(name => {
+    const tests = {};
+    ['中1','中2','中3'].forEach(grade => tests[grade] = forestaNextTest_({school: name, grade}, null));
+    return {name, tests};
+  });
+  const units = forestaRangeUnitsByGrade_();
+  const settings = forestaRangeSettings_().filter(row =>
+    schoolNames.has(String(row.school || '').trim()) && forestaJuniorGrade_(row.grade) && ['英語','数学'].includes(String(row.subject || ''))
+  ).map(row => {
+    const grade = forestaJuniorGrade_(row.grade);
+    const subject = String(row.subject || '');
+    const gradeUnits = units[grade + '|' + subject] || [];
+    const startUnit = gradeUnits.find(item => item.unitId === String(row.predictedRangeStartUnitId || '')) || {};
+    const endUnit = gradeUnits.find(item => item.unitId === String(row.predictedRangeEndUnitId || '')) || {};
+    return Object.assign({}, row, {
+      grade,
+      predictedRangeStartCode: startUnit.stepCode || '', predictedRangeStartTitle: startUnit.unitTitle || '',
+      predictedRangeEndCode: endUnit.stepCode || '', predictedRangeEndTitle: endUnit.unitTitle || ''
+    });
+  }).sort((a,b) => String(a.school).localeCompare(String(b.school),'ja') || String(a.grade).localeCompare(String(b.grade),'ja') || String(a.subject).localeCompare(String(b.subject),'ja'));
+  return {success: true, schools, settings, units, generatedAt: nowIso_()};
+}
+
+function saveForestaRangeSetting_(session, input) {
+  requireRole_(session, [ROLE.ADMIN]);
+  const school = String(input && input.school || '').trim();
+  const grade = forestaJuniorGrade_(input && input.grade);
+  const subject = String(input && input.subject || '').trim();
+  const predictedRangeStartUnitId = String(input && input.predictedRangeStartUnitId || '').trim();
+  const predictedRangeEndUnitId = String(input && input.predictedRangeEndUnitId || '').trim();
+  if (!school || !grade || !['英語','数学'].includes(subject)) {
+    throw publicError_('中学校・学年・科目を確認してください。', 'INVALID_RANGE_GROUP');
+  }
+  const knownSchools = new Set(getRowsAsObjects_('StudentProfiles').map(row => String(row.school || '').trim()).filter(Boolean));
+  forestaSchools_().forEach(row => { const name = String(row && row.name || '').trim(); if (name) knownSchools.add(name); });
+  if (!knownSchools.has(school)) throw publicError_('登録されている中学校を選択してください。', 'SCHOOL_NOT_FOUND');
+  const units = forestaUnitsFor_({grade}, subject, {english: 3, math: 3});
+  const startUnit = units.find(item => item.unitId === predictedRangeStartUnitId);
+  const endUnit = units.find(item => item.unitId === predictedRangeEndUnitId);
+  if (!startUnit || !endUnit) throw publicError_('予想テスト範囲の開始単元と最終単元を選択してください。', 'RANGE_UNIT_REQUIRED');
+  if (startUnit.order > endUnit.order) throw publicError_('予想テスト範囲の開始単元と最終単元の順序を確認してください。', 'INVALID_TEST_RANGE');
+  const rows = forestaRangeSettings_();
+  const current = rows.find(row =>
+    String(row.school || '').trim() === school && forestaJuniorGrade_(row.grade) === grade && String(row.subject || '') === subject
+  );
+  const next = {
+    rangeId: current && current.rangeId || Utilities.getUuid(), school, grade, subject,
+    predictedRangeStartUnitId: startUnit.unitId, predictedRangeEndUnitId: endUnit.unitId,
+    updatedAt: nowIso_(), updatedBy: session.userId
+  };
+  if (current) forestaUpdate_(FORESTA_RANGE_SETTINGS_SHEET, FORESTA_RANGE_SETTINGS_HEADERS, current._rowNumber, next);
+  else forestaAppend_(FORESTA_RANGE_SETTINGS_SHEET, FORESTA_RANGE_SETTINGS_HEADERS, next);
+  writeAudit_(session, 'SAVE_FORESTA_RANGE_SETTING', FORESTA_RANGE_SETTINGS_SHEET, next.rangeId, current, next);
+  return {success: true, setting: Object.assign({}, next, {
+    predictedRangeStartCode: startUnit.stepCode, predictedRangeStartTitle: startUnit.unitTitle,
+    predictedRangeEndCode: endUnit.stepCode, predictedRangeEndTitle: endUnit.unitTitle
+  })};
 }
 
 function saveForestaLesson_(session, input) {
