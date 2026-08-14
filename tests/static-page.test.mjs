@@ -171,10 +171,10 @@ test("Step and Goal are selectable in parallel without overwriting each other", 
   assert.match(html, /フォレスタゴールを選んでも、フォレスタステップの選択は変わりません/);
 });
 
-test("screen title is 学習進捗管理", () => {
-  assert.match(html, /<title>学習進捗管理(?:【開発】)?<\/title>/);
-  assert.match(html, /<h1>学習進捗管理<\/h1>/);
-  assert.match(html, /<span>学習進捗管理(?:【開発】)?<\/span>/);
+test("screen title is ステップ＆ゴール進捗管理", () => {
+  assert.match(html, /<title>ステップ＆ゴール進捗管理(?:【開発】)?<\/title>/);
+  assert.match(html, /<h1>ステップ＆ゴール進捗管理<\/h1>/);
+  assert.match(html, /<span>ステップ＆ゴール進捗管理(?:【開発】)?<\/span>/);
   assert.doesNotMatch(html, /自主学習進捗管理/);
 });
 

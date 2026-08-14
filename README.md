@@ -1,6 +1,8 @@
-# フォレスタステップ進捗管理
+# ステップ＆ゴール進捗管理
 
-Googleアカウントを必要としない公開画面です。画面はGitHub Pagesから配信し、データの取得・保存のみを開発用Google Apps Script APIへ送信します。
+夏休み講習で使う、目標範囲・学習進捗・次回宿題の管理画面です。Googleアカウントを必要としない公開画面としてGitHub Pagesから配信し、データの取得・保存のみをGoogle Apps Script APIへ送信します。
+
+通常授業用の「フォレスタ進捗管理」は `foresta.html` です。
 
 - Apps ScriptのHTML Serviceやiframeは使用しません。
 - 生徒認証、セッション検証、本人データ限定、講師・管理者権限はサーバー側で処理します。
