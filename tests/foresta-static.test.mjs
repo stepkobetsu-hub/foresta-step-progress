@@ -21,6 +21,16 @@ test('administrator overview covers the requested daily signals', () => {
   assert.match(js, /必要ペース/);
 });
 
+test('administrator search matches the delivery-system search behavior without losing focus', () => {
+  assert.match(html, />ステップ＆ゴールへ<\/a>/);
+  assert.match(js, /生徒コード・氏名・フリガナ・ローマ字で検索/);
+  assert.match(js, /function normalizeStudentSearch_/);
+  assert.match(js, /function kanaToRomaji_/);
+  assert.match(js, /refreshAdminStudentRows_\(\)/);
+  assert.doesNotMatch(js, /state\.filters\.query=e\.target\.value;renderAdmin\(\)/);
+  assert.match(server, /kana: getAdminStudentKana_|const kana = getAdminStudentKana_/);
+});
+
 test('lesson form requires school progress, teacher, CT and homework status', () => {
   assert.match(js, /name="instructorName" required/);
   assert.match(js, /name="schoolProgressUnitId" required/);
