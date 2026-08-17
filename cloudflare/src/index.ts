@@ -149,23 +149,10 @@ const proxyGoogleRpc = async (env: Env, body: Record<string, unknown>) => {
 
 const handleBrowserRpc = async (request: Request, env: Env, trace: Trace) => {
   const body = await measured(trace, "body", () => parseBody(request));
-  if (String(body.action || "") !== "getStudentDashboard") return proxyGoogleRpc(env, body);
-
-  // Validate the existing Google session before returning private D1 data.
-  const sessionResponse = await measured(trace, "session", () => fetch(env.GOOGLE_API_URL, {
-    method: "POST",
-    headers: { "content-type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "getSession", token: body.token }),
-    redirect: "follow",
-  }));
-  const sessionValue: unknown = await sessionResponse.json();
-  if (!isRecord(sessionValue) || sessionValue.success !== true) return json(sessionValue, sessionResponse.status);
-  const role = String(sessionValue.role || "");
-  const studentId = role === "STUDENT" ? String(sessionValue.userId || "") : String(body.studentId || "");
-  if (!studentId) return json({ success: false, error: "生徒情報が見つかりません。" }, 400);
-  const dashboard = await measured(trace, "d1Dashboard", () => readDashboard(env, studentId));
-  if (!dashboard) return proxyGoogleRpc(env, body);
-  return json({ success: true, data: dashboard, source: "cloudflare-d1" }, 200, { "x-data-source": "cloudflare-d1" });
+  // Keep the browser's reads and writes on the same authoritative store.
+  // D1 remains available through the authenticated mirror endpoints below,
+  // but must not serve a dashboard until browser mutations also write to D1.
+  return measured(trace, "googleProxy", () => proxyGoogleRpc(env, body));
 };
 
 const writeDenied = (env: Env, studentId: string) =>
