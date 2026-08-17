@@ -86,14 +86,22 @@ jobs:
         working-directory: cloudflare
         run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Restore Japanese, science and social-studies target ranges"
 
-      - name: Verify production health and unchanged UI
+      - name: Verify production health and cache version
         shell: bash
         run: |
           curl --fail --silent --show-error \
             https://step-progress-api.stepkobetsu.workers.dev/health \
             | tee /tmp/health.json
           node -e 'const fs=require("fs"); const h=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(h.ok!==true) process.exit(1)'
-          curl --fail --silent --show-error --location \
-            https://step-progress-api.stepkobetsu.workers.dev/ \
-            --output /tmp/production-index.html
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --show-error --location \
+              -H 'Cache-Control: no-cache' \
+              https://step-progress-api.stepkobetsu.workers.dev/ \
+              --output /tmp/production-index.html
+            CURRENT_HTML_SHA256="$(sha256sum /tmp/production-index.html | cut -d' ' -f1)"
+            if [ "$CURRENT_HTML_SHA256" = "$EXPECTED_DEPLOYED_HTML_SHA256" ]; then
+              break
+            fi
+            sleep 5
+          done
           echo "$EXPECTED_DEPLOYED_HTML_SHA256  /tmp/production-index.html" | sha256sum --check
