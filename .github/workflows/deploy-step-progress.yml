@@ -70,10 +70,6 @@ jobs:
             tests/summary.test.mjs \
             tests/write-guard.test.mjs
 
-      - name: Apply homework archive migration
-        working-directory: cloudflare
-        run: npx wrangler d1 migrations apply step-progress-db --remote --config wrangler.jsonc
-
       - name: Deploy to production
         working-directory: cloudflare
         run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Persist homework archives across logins"
