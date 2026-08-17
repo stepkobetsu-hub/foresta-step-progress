@@ -16,6 +16,7 @@ function archiveDb(initial = []) {
           return { results: [...rows].filter(([, archived]) => archived).map(([group_key]) => ({ group_key })) };
         },
         async run() {
+          if (/CREATE TABLE IF NOT EXISTS homework_group_archives/.test(sql)) return { results: [], meta: { changes: 0 } };
           assert.match(sql, /INSERT INTO homework_group_archives/);
           rows.set(String(values[1]), Number(values[2]));
           return { results: [], meta: { changes: 1 } };

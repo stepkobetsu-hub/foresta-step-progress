@@ -160,7 +160,25 @@ const browserStudentId = (session: Record<string, unknown>, requestedStudentId =
   return "";
 };
 
+let homeworkArchiveSchema: Promise<unknown> | null = null;
+const ensureHomeworkArchiveSchema = (env: Env) => {
+  if (!homeworkArchiveSchema) {
+    homeworkArchiveSchema = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS homework_group_archives (
+         student_id TEXT NOT NULL,
+         group_key TEXT NOT NULL,
+         archived INTEGER NOT NULL DEFAULT 1 CHECK (archived IN (0, 1)),
+         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+         updated_by TEXT NOT NULL DEFAULT '',
+         PRIMARY KEY (student_id, group_key)
+       )`
+    ).run().catch((error) => { homeworkArchiveSchema = null; throw error; });
+  }
+  return homeworkArchiveSchema;
+};
+
 const archivedGroupKeys = async (env: Env, studentId: string) => {
+  await ensureHomeworkArchiveSchema(env);
   const result = await env.DB.prepare(
     "SELECT group_key FROM homework_group_archives WHERE student_id = ? AND archived = 1 ORDER BY updated_at DESC, group_key"
   ).bind(studentId).all<{ group_key: string }>();
@@ -179,6 +197,7 @@ const handleBrowserArchiveWrite = async (env: Env, body: Record<string, unknown>
   const studentId = browserStudentId(session, requestedStudentId);
   if (!studentId || studentId.length > 100) return json({ success: false, error: "STUDENT_NOT_ALLOWED" }, 403);
   const archived = body.archived ? 1 : 0;
+  await ensureHomeworkArchiveSchema(env);
   await env.DB.prepare(
     `INSERT INTO homework_group_archives (student_id, group_key, archived, updated_at, updated_by)
      VALUES (?, ?, ?, datetime('now'), ?)
