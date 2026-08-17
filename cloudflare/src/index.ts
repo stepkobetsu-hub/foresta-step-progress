@@ -147,12 +147,70 @@ const proxyGoogleRpc = async (env: Env, body: Record<string, unknown>) => {
   });
 };
 
+const googleSession = async (env: Env, token: string) => {
+  const response = await proxyGoogleRpc(env, { action: "getSession", token });
+  const value: unknown = await response.json();
+  return isRecord(value) ? value : { success: false, error: "INVALID_SESSION_RESPONSE" };
+};
+
+const browserStudentId = (session: Record<string, unknown>, requestedStudentId = "") => {
+  const role = String(session.role || "").toUpperCase();
+  if (role === "STUDENT") return String(session.userId || "").trim();
+  if (["ADMIN", "TEACHER"].includes(role)) return requestedStudentId.trim();
+  return "";
+};
+
+const archivedGroupKeys = async (env: Env, studentId: string) => {
+  const result = await env.DB.prepare(
+    "SELECT group_key FROM homework_group_archives WHERE student_id = ? AND archived = 1 ORDER BY updated_at DESC, group_key"
+  ).bind(studentId).all<{ group_key: string }>();
+  return result.results.map((row) => String(row.group_key));
+};
+
+const handleBrowserArchiveWrite = async (env: Env, body: Record<string, unknown>) => {
+  const token = String(body.token || "");
+  const groupKey = String(body.groupKey || "").trim();
+  const requestedStudentId = String(body.studentId || "").trim();
+  if (!token || !groupKey || groupKey.length > 500 || /[\u0000-\u001f]/.test(groupKey) || typeof body.archived !== "boolean") {
+    return json({ success: false, error: "INVALID_ARCHIVE_REQUEST" }, 400);
+  }
+  const session = await googleSession(env, token);
+  if (session.success !== true) return json(session, 200, { "x-data-source": "google-v83" });
+  const studentId = browserStudentId(session, requestedStudentId);
+  if (!studentId || studentId.length > 100) return json({ success: false, error: "STUDENT_NOT_ALLOWED" }, 403);
+  const archived = body.archived ? 1 : 0;
+  await env.DB.prepare(
+    `INSERT INTO homework_group_archives (student_id, group_key, archived, updated_at, updated_by)
+     VALUES (?, ?, ?, datetime('now'), ?)
+     ON CONFLICT(student_id, group_key) DO UPDATE SET
+       archived = excluded.archived,
+       updated_at = excluded.updated_at,
+       updated_by = excluded.updated_by`
+  ).bind(studentId, groupKey, archived, String(session.userId || studentId)).run();
+  return json({ success: true, archivedGroupKeys: await archivedGroupKeys(env, studentId) }, 200, {
+    "x-data-source": "cloudflare-d1-homework-archive",
+  });
+};
+
 const handleBrowserRpc = async (request: Request, env: Env, trace: Trace) => {
   const body = await measured(trace, "body", () => parseBody(request));
+  if (body.action === "setHomeworkGroupArchived") {
+    return measured(trace, "archiveWrite", () => handleBrowserArchiveWrite(env, body));
+  }
   // Keep the browser's reads and writes on the same authoritative store.
   // D1 remains available through the authenticated mirror endpoints below,
   // but must not serve a dashboard until browser mutations also write to D1.
-  return measured(trace, "googleProxy", () => proxyGoogleRpc(env, body));
+  const upstream = await measured(trace, "googleProxy", () => proxyGoogleRpc(env, body));
+  if (body.action !== "listHomework" || !upstream.ok) return upstream;
+  const value: unknown = await upstream.clone().json().catch(() => null);
+  if (!isRecord(value) || value.success !== true) return upstream;
+  const session = await measured(trace, "archiveAuth", () => googleSession(env, String(body.token || "")));
+  if (session.success !== true) return upstream;
+  const filters = isRecord(body.filters) ? body.filters : {};
+  const studentId = browserStudentId(session, String(filters.studentId || ""));
+  if (!studentId) return upstream;
+  const keys = await measured(trace, "archiveRead", () => archivedGroupKeys(env, studentId));
+  return json({ ...value, archivedGroupKeys: keys }, upstream.status, { "x-data-source": "google-v83+archive-d1" });
 };
 
 const writeDenied = (env: Env, studentId: string) =>
