@@ -1,4 +1,4 @@
-name: Deploy step-progress common-grade hotfix
+name: Deploy step-progress homework archive persistence
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      EXPECTED_LIVE_HTML_SHA256: 9d67371dbe8b4e155e85952cdbf626d00ba38aa2f6cc63a636ab5d6fe14a5866
-      EXPECTED_DEPLOYED_HTML_SHA256: 36f423466da8569fb29b6df1ee0957a1cf90972b82d478a3986e5267cbed394a
+      EXPECTED_LIVE_HTML_SHA256: 36f423466da8569fb29b6df1ee0957a1cf90972b82d478a3986e5267cbed394a
+      EXPECTED_DEPLOYED_HTML_SHA256: 2f9ad7ad841b87edd7f1113af5555f290d5cd811446369d6d505cc1d0318946d
     steps:
       - name: Require Cloudflare secrets
         shell: bash
@@ -42,7 +42,7 @@ jobs:
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
 
-      - name: Preserve the UI and invalidate stale dashboard caches
+      - name: Preserve the UI and add persistent homework archives
         working-directory: cloudflare
         shell: bash
         run: |
@@ -55,21 +55,7 @@ jobs:
             echo "Unexpected production UI hash: $CURRENT_HTML_SHA256"
             exit 1
           fi
-          node <<'NODE'
-          const fs = require('fs');
-          const path = 'public/index.html';
-          let html = fs.readFileSync(path, 'utf8');
-          html = html.replaceAll("'fsAdminDashboard:commonGradeFix20260817:'", "'fsAdminDashboard:storageConsistencyFix20260817:'");
-          html = html.replace(
-            "const STUDENT_VIEW_CACHE_PREFIX='forestaProgress.viewCache:commonGradeFix20260817:';",
-            "const STUDENT_VIEW_CACHE_PREFIX='forestaProgress.viewCache:storageConsistencyFix20260817:';"
-          );
-          if (!html.includes('fsAdminDashboard:storageConsistencyFix20260817:') ||
-              !html.includes('forestaProgress.viewCache:storageConsistencyFix20260817:')) {
-            throw new Error('cache version replacement failed');
-          }
-          fs.writeFileSync(path, html);
-          NODE
+          node scripts/apply-homework-archive-persistence.mjs public/index.html
           echo "$EXPECTED_DEPLOYED_HTML_SHA256  public/index.html" | sha256sum --check
 
       - name: Verify the hotfix
@@ -80,14 +66,19 @@ jobs:
           node --test \
             tests/browser-api-consistency.test.mjs \
             tests/dashboard.test.mjs \
+            tests/homework-archive-persistence.test.mjs \
             tests/summary.test.mjs \
             tests/write-guard.test.mjs
 
+      - name: Apply homework archive migration
+        working-directory: cloudflare
+        run: npx wrangler d1 migrations apply step-progress-db --remote --config wrangler.jsonc
+
       - name: Deploy to production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Keep browser reads and writes on Google"
+        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Persist homework archives across logins"
 
-      - name: Verify production health and cache version
+      - name: Verify production health and archive persistence UI
         shell: bash
         run: |
           curl --fail --silent --show-error \
