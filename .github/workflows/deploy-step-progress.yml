@@ -21,6 +21,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       EXPECTED_LIVE_HTML_SHA256: 3c29a4715d0d6ed94af406d00c27581bba49174693349edbb7e3f1a2152c2e0a
+      EXPECTED_DEPLOYED_HTML_SHA256: 9d67371dbe8b4e155e85952cdbf626d00ba38aa2f6cc63a636ab5d6fe14a5866
     steps:
       - name: Require Cloudflare secrets
         shell: bash
@@ -41,14 +42,35 @@ jobs:
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
 
-      - name: Preserve the current production UI
+      - name: Preserve the UI and invalidate stale dashboard caches
         working-directory: cloudflare
         shell: bash
         run: |
           curl --fail --silent --show-error --location \
             https://step-progress-api.stepkobetsu.workers.dev/ \
             --output public/index.html
-          echo "$EXPECTED_LIVE_HTML_SHA256  public/index.html" | sha256sum --check
+          CURRENT_HTML_SHA256="$(sha256sum public/index.html | cut -d' ' -f1)"
+          if [ "$CURRENT_HTML_SHA256" != "$EXPECTED_LIVE_HTML_SHA256" ] && \
+             [ "$CURRENT_HTML_SHA256" != "$EXPECTED_DEPLOYED_HTML_SHA256" ]; then
+            echo "Unexpected production UI hash: $CURRENT_HTML_SHA256"
+            exit 1
+          fi
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'public/index.html';
+          let html = fs.readFileSync(path, 'utf8');
+          html = html.replaceAll("'fsAdminDashboard:'", "'fsAdminDashboard:commonGradeFix20260817:'");
+          html = html.replace(
+            "const STUDENT_VIEW_CACHE_PREFIX='forestaProgress.viewCache:';",
+            "const STUDENT_VIEW_CACHE_PREFIX='forestaProgress.viewCache:commonGradeFix20260817:';"
+          );
+          if (!html.includes('fsAdminDashboard:commonGradeFix20260817:') ||
+              !html.includes('forestaProgress.viewCache:commonGradeFix20260817:')) {
+            throw new Error('cache version replacement failed');
+          }
+          fs.writeFileSync(path, html);
+          NODE
+          echo "$EXPECTED_DEPLOYED_HTML_SHA256  public/index.html" | sha256sum --check
 
       - name: Verify the hotfix
         working-directory: cloudflare
@@ -74,4 +96,4 @@ jobs:
           curl --fail --silent --show-error --location \
             https://step-progress-api.stepkobetsu.workers.dev/ \
             --output /tmp/production-index.html
-          echo "$EXPECTED_LIVE_HTML_SHA256  /tmp/production-index.html" | sha256sum --check
+          echo "$EXPECTED_DEPLOYED_HTML_SHA256  /tmp/production-index.html" | sha256sum --check
