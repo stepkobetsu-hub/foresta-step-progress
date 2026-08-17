@@ -1,0 +1,79 @@
+name: Deploy step-progress common-grade hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-step-progress.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step-progress-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_LIVE_HTML_SHA256: 3c29a4715d0d6ed94af406d00c27581bba49174693349edbb7e3f1a2152c2e0a
+    steps:
+      - name: Require Cloudflare secrets
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+
+      - name: Check out the reviewed hotfix
+        uses: actions/checkout@v4
+        with:
+          ref: agent/cloudflare-progress-migration
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Preserve the current production UI
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location \
+            https://step-progress-api.stepkobetsu.workers.dev/ \
+            --output public/index.html
+          echo "$EXPECTED_LIVE_HTML_SHA256  public/index.html" | sha256sum --check
+
+      - name: Verify the hotfix
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          npm run check
+          node --test \
+            tests/dashboard.test.mjs \
+            tests/summary.test.mjs \
+            tests/write-guard.test.mjs
+
+      - name: Deploy to production
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Restore Japanese, science and social-studies target ranges"
+
+      - name: Verify production health and unchanged UI
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            https://step-progress-api.stepkobetsu.workers.dev/health \
+            | tee /tmp/health.json
+          node -e 'const fs=require("fs"); const h=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(h.ok!==true) process.exit(1)'
+          curl --fail --silent --show-error --location \
+            https://step-progress-api.stepkobetsu.workers.dev/ \
+            --output /tmp/production-index.html
+          echo "$EXPECTED_LIVE_HTML_SHA256  /tmp/production-index.html" | sha256sum --check
