@@ -119,7 +119,10 @@ const readDashboard = async (env: Env, studentId: string) => {
     `SELECT u.unit_id,u.subject,u.grade,u.unit_order,u.unit_type,u.title AS unit_title,u.has_lct,
             m.series,m.active
        FROM units u JOIN materials m ON m.material_id=u.material_id
-      WHERE m.active=1 AND (u.grade='' OR u.grade=? OR m.grade='' OR m.grade=?)
+      WHERE m.active=1 AND (
+        u.grade='' OR u.grade=? OR u.grade='中1～中3共通' OR
+        m.grade='' OR m.grade=? OR m.grade='中1～中3共通'
+      )
       ORDER BY u.subject,m.series,u.unit_order,u.unit_id`
   ).bind(String(student.grade || ""), String(student.grade || "")).all();
   return buildV83Dashboard(

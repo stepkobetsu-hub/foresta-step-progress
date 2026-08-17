@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildV83Dashboard } from "../src/dashboard.ts";
 
 test("D1 rows are mapped to the v83 dashboard shape used by the real UI", () => {
@@ -19,4 +20,10 @@ test("D1 rows are mapped to the v83 dashboard shape used by the real UI", () => 
   assert.equal(dashboard.selectableUnits[0].targetIncluded, true);
   assert.equal(dashboard.lct.completedCount, 1);
   assert.equal(dashboard.homeworkSummary.unconfirmedCount, 1);
+});
+
+test("dashboard query includes units shared by all junior-high grades", () => {
+  const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  assert.match(source, /u\.grade='中1～中3共通'/);
+  assert.match(source, /m\.grade='中1～中3共通'/);
 });
