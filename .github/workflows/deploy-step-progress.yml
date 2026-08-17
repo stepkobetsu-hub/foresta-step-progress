@@ -78,13 +78,14 @@ jobs:
         run: |
           npm run check
           node --test \
+            tests/browser-api-consistency.test.mjs \
             tests/dashboard.test.mjs \
             tests/summary.test.mjs \
             tests/write-guard.test.mjs
 
       - name: Deploy to production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Restore Japanese, science and social-studies target ranges"
+        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Keep browser reads and writes on Google"
 
       - name: Verify production health and cache version
         shell: bash
