@@ -20,14 +20,12 @@ jobs:
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       EXPECTED_LIVE_HTML_SHA256: 3c29a4715d0d6ed94af406d00c27581bba49174693349edbb7e3f1a2152c2e0a
     steps:
       - name: Require Cloudflare secrets
         shell: bash
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
 
       - name: Check out the reviewed hotfix
         uses: actions/checkout@v4
