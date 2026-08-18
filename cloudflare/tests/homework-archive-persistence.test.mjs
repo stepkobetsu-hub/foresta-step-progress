@@ -61,4 +61,5 @@ test("production UI patch makes archive clicks await a server save", () => {
   assert.match(patched, /archivedGroupKeys/);
   assert.match(patched, /saveStudentViewCache_\(\)/);
   assert.match(patched, /viewCache:archivePersistence20260817/);
+  assert.doesNotMatch(patched, /'setHomeworkGroupArchived','setHomeworkGroupArchived'/);
 });

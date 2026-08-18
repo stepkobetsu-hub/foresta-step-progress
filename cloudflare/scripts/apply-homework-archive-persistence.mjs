@@ -25,13 +25,17 @@ export function applyHomeworkArchivePersistence(html) {
       "body.onclick=async event=>{const archive=event.target.closest('[data-admin-archive-group]');if(archive&&body.contains(archive)){archive.disabled=true;if(await setHomeworkArchived_(archive.dataset.adminArchiveGroup,archive.dataset.archived==='true',studentId,home))await renderAdminStudentDashboard_(d,studentId);else archive.disabled=false;return}",
     ],
   ];
-  let output = html.replace(
+  let output = html.replaceAll(
+    "'setHomeworkGroupArchived','setHomeworkGroupArchived'",
+    "'setHomeworkGroupArchived'",
+  ).replace(
     "async function setHomeworkArchived_(groupKey,archived,studentId='',home=state.homeworkCache){beginSave_();try{const out=await call('setHomeworkGroupArchived',{groupKey:String(groupKey),archived:!!archived,...(studentId?{studentId:String(studentId)}:{})}),keys=Array.isArray(out.archivedGroupKeys)?out.archivedGroupKeys.map(String):[];if(home)home.archivedGroupKeys=keys;localStorage.setItem(homeworkArchiveKey_(studentId),JSON.stringify(keys));endSave_(archived?'アーカイブへ保存しました':'宿題一覧へ戻しました');return true}catch(error){failSave_();toast(error.message);return false}}",
     "async function setHomeworkArchived_(groupKey,archived,studentId='',home=state.homeworkCache){beginSave_();try{const out=await call('setHomeworkGroupArchived',{groupKey:String(groupKey),archived:!!archived,...(studentId?{studentId:String(studentId)}:{})}),keys=Array.isArray(out.archivedGroupKeys)?out.archivedGroupKeys.map(String):[];if(home)home.archivedGroupKeys=keys;localStorage.setItem(homeworkArchiveKey_(studentId),JSON.stringify(keys));saveStudentViewCache_();endSave_(archived?'アーカイブへ保存しました':'宿題一覧へ戻しました');return true}catch(error){failSave_();toast(error.message);return false}}",
   );
   for (const [before, after] of replacements) {
+    if (output.includes(after)) continue;
     if (output.includes(before)) output = output.replace(before, after);
-    else if (!output.includes(after)) throw new Error(`archive persistence patch target not found: ${before.slice(0, 80)}`);
+    else throw new Error(`archive persistence patch target not found: ${before.slice(0, 80)}`);
   }
   output = output
     .replaceAll("'fsAdminDashboard:storageConsistencyFix20260817:'", "'fsAdminDashboard:archivePersistence20260817:'")
