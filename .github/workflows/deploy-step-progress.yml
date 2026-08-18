@@ -20,8 +20,8 @@ jobs:
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      EXPECTED_LIVE_HTML_SHA256: 2f9ad7ad841b87edd7f1113af5555f290d5cd811446369d6d505cc1d0318946d
-      EXPECTED_DEPLOYED_HTML_SHA256: e0f240c341d8d62ff134c8089b3ddbeeb73f8cb538fd15310912acee5a5e3f94
+      EXPECTED_LIVE_HTML_SHA256: e0f240c341d8d62ff134c8089b3ddbeeb73f8cb538fd15310912acee5a5e3f94
+      EXPECTED_DEPLOYED_HTML_SHA256: 3a248ee89f3a105fc4bedff3d3abeaacfd7791f38eadee5fa42f9e1388304cc5
     steps:
       - name: Require Cloudflare secrets
         shell: bash
