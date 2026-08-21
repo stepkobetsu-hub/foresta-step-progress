@@ -1,4 +1,4 @@
-name: Deploy step-progress goal target cloud reliability
+name: Deploy step-progress homework check cloud reliability
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
     timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      EXPECTED_LIVE_HTML_SHA256: e0f240c341d8d62ff134c8089b3ddbeeb73f8cb538fd15310912acee5a5e3f94
-      EXPECTED_DEPLOYED_HTML_SHA256: 3a248ee89f3a105fc4bedff3d3abeaacfd7791f38eadee5fa42f9e1388304cc5
+      EXPECTED_LIVE_HTML_SHA256: 3a248ee89f3a105fc4bedff3d3abeaacfd7791f38eadee5fa42f9e1388304cc5
+      EXPECTED_DEPLOYED_HTML_SHA256: fa4be31596b9cb63a38f1522b6df1f7f7e7cf83420329fe4ac53c5daad841dbf
     steps:
       - name: Require Cloudflare secrets
         shell: bash
@@ -42,7 +42,7 @@ jobs:
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
 
-      - name: Preserve the UI and strengthen goal target cloud saves
+      - name: Preserve the UI and strengthen homework check cloud saves
         working-directory: cloudflare
         shell: bash
         run: |
@@ -57,6 +57,7 @@ jobs:
           fi
           node scripts/apply-homework-archive-persistence.mjs public/index.html
           node scripts/apply-target-cloud-reliability.mjs public/index.html
+          node scripts/apply-homework-check-reliability.mjs public/index.html
           echo "$EXPECTED_DEPLOYED_HTML_SHA256  public/index.html" | sha256sum --check
 
       - name: Verify the hotfix
@@ -68,15 +69,16 @@ jobs:
             tests/browser-api-consistency.test.mjs \
             tests/dashboard.test.mjs \
             tests/homework-archive-persistence.test.mjs \
+            tests/homework-check-reliability.test.mjs \
             tests/summary.test.mjs \
             tests/target-cloud-reliability.test.mjs \
             tests/write-guard.test.mjs
 
       - name: Deploy to production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Retry goal target saves to Google cloud"
+        run: npx wrangler deploy --config wrangler.jsonc --keep-vars --message "Persist homework checks after Google cloud save"
 
-      - name: Verify production health and goal cloud-save UI
+      - name: Verify production health and homework cloud-save UI
         shell: bash
         run: |
           curl --fail --silent --show-error \
