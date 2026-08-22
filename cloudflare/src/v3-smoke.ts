@@ -76,13 +76,64 @@ const inspect = async (env: SmokeEnv, body: Row) => {
 };
 
 const inspectRecent1320 = async (env: SmokeEnv) => {
-  const [overrides, snapshot] = await env.DB.batch([
-    env.DB.prepare(`SELECT homework_id,student_status,student_completed_date,teacher_status,updated_at,updated_by
-      FROM v3_homework_overrides WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 40`),
-    env.DB.prepare(`SELECT homework_id,status,assigned_date,due_date,updated_at
-      FROM v3_homework_snapshot WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 20`),
-  ]);
-  return json({ ok: true, overrides: overrides.results, snapshot: snapshot.results });
+  const names = `('渡辺悠一郎','高岡邦大','大渕ひかる','元永祐輔','上野心美')`;
+  const current = await env.DB.prepare(`WITH wanted AS (
+      SELECT student_id,display_name FROM students
+      WHERE REPLACE(REPLACE(display_name,' ',''),'　','') IN ${names}
+    ), eff AS (
+      SELECT t.student_id,t.subject,t.target_start AS unit_id,COALESCE(m.series,'FORESTA_STEP') AS series,
+             COALESCE(o.included,t.included) AS included
+      FROM v3_target_snapshot t
+      JOIN wanted w ON w.student_id=t.student_id
+      LEFT JOIN units u ON u.unit_id=t.target_start
+      LEFT JOIN materials m ON m.material_id=u.material_id
+      LEFT JOIN v3_target_overrides o ON o.student_id=t.student_id AND o.unit_id=t.target_start
+        AND o.subject=t.subject AND o.series=COALESCE(m.series,'FORESTA_STEP')
+      WHERE t.target_start IS NOT NULL AND t.target_start<>''
+      GROUP BY t.student_id,t.subject,t.target_start,COALESCE(m.series,'FORESTA_STEP')
+    ), targets AS (
+      SELECT student_id,subject,COUNT(*) AS target_count FROM eff WHERE included=1 GROUP BY student_id,subject
+    ), completed AS (
+      SELECT e.student_id,e.subject,COUNT(*) AS completed_count
+      FROM eff e JOIN v3_progress_records p ON p.student_id=e.student_id AND p.unit_id=e.unit_id AND p.subject=e.subject
+      WHERE e.included=1 AND p.round BETWEEN 1 AND 3 AND p.try_completed=1
+      GROUP BY e.student_id,e.subject
+    )
+    SELECT 'V3' AS source,w.student_id,w.display_name,sub.subject,
+           COALESCE(c.completed_count,0) AS completed_count,COALESCE(t.target_count,0) AS target_count
+    FROM wanted w CROSS JOIN (SELECT '英語' subject UNION ALL SELECT '数学' UNION ALL SELECT '国語' UNION ALL SELECT '理科' UNION ALL SELECT '社会') sub
+    LEFT JOIN targets t ON t.student_id=w.student_id AND t.subject=sub.subject
+    LEFT JOIN completed c ON c.student_id=w.student_id AND c.subject=sub.subject
+    ORDER BY w.display_name,sub.subject`).all();
+
+  const legacy = await env.DB.prepare(`WITH wanted AS (
+      SELECT student_id,display_name FROM students
+      WHERE REPLACE(REPLACE(display_name,' ',''),'　','') IN ${names}
+    ), eff AS (
+      SELECT t.student_id,t.subject,t.target_start AS unit_id,COALESCE(m.series,'FORESTA_STEP') AS series,MAX(t.included) AS included
+      FROM student_targets t
+      JOIN wanted w ON w.student_id=t.student_id
+      LEFT JOIN units u ON u.unit_id=t.target_start
+      LEFT JOIN materials m ON m.material_id=u.material_id
+      WHERE t.target_start IS NOT NULL AND t.target_start<>''
+      GROUP BY t.student_id,t.subject,t.target_start,COALESCE(m.series,'FORESTA_STEP')
+    ), targets AS (
+      SELECT student_id,subject,COUNT(*) AS target_count FROM eff WHERE included=1 GROUP BY student_id,subject
+    ), completed AS (
+      SELECT e.student_id,e.subject,COUNT(*) AS completed_count
+      FROM eff e JOIN progress_records p ON p.student_id=e.student_id AND p.unit_id=e.unit_id AND p.subject=e.subject
+      WHERE e.included=1 AND p.round BETWEEN 1 AND 3 AND p.try_completed=1
+      GROUP BY e.student_id,e.subject
+    )
+    SELECT 'LEGACY' AS source,w.student_id,w.display_name,sub.subject,
+           COALESCE(c.completed_count,0) AS completed_count,COALESCE(t.target_count,0) AS target_count
+    FROM wanted w CROSS JOIN (SELECT '英語' subject UNION ALL SELECT '数学' UNION ALL SELECT '国語' UNION ALL SELECT '理科' UNION ALL SELECT '社会') sub
+    LEFT JOIN targets t ON t.student_id=w.student_id AND t.subject=sub.subject
+    LEFT JOIN completed c ON c.student_id=w.student_id AND c.subject=sub.subject
+    ORDER BY w.display_name,sub.subject`).all();
+
+  const count = await env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_target_overrides`).first<Row>();
+  return json({ ok: true, overrides: [{ target_override_count: Number(count?.count || 0) }], snapshot: [...current.results, ...legacy.results] });
 };
 
 const publicStatus = async (env: SmokeEnv) => {
