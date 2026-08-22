@@ -60,11 +60,11 @@ jobs:
           from pathlib import Path
           p=Path('public/index.html')
           s=p.read_text(encoding='utf-8')
-          needle="if (hasCommonSession || hasStoredSession || hasRememberedStaff) document.documentElement.classList.add('auth-resume-pending');"
-          replacement=needle+"\n      setTimeout(() => document.documentElement.classList.remove('auth-resume-pending'), 2500);"
-          if needle not in s:
-              raise SystemExit('auth resume insertion point not found')
-          s=s.replace(needle,replacement,1)
+          marker='</head>'
+          fallback="<script>setTimeout(function(){document.documentElement.classList.remove('auth-resume-pending');var el=document.getElementById('login');if(el)el.style.visibility='visible';},2500);</script>\n"
+          if marker not in s:
+              raise SystemExit('head closing tag not found')
+          s=s.replace(marker,fallback+marker,1)
           p.write_text(s,encoding='utf-8')
           PY
           npm run check
