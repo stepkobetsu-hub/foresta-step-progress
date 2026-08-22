@@ -29,7 +29,9 @@ const prepare = async (env: SmokeEnv) => {
       FROM v3_progress_records WHERE student_id='1320'
       ORDER BY CASE WHEN learning_date IS NULL OR learning_date='' THEN 1 ELSE 0 END, updated_at DESC LIMIT 1`),
     env.DB.prepare(`SELECT t.target_start AS unit_id,t.subject,COALESCE(m.series,'FORESTA_STEP') AS series,t.included
-      FROM v3_target_snapshot t LEFT JOIN materials m ON m.material_id=t.material_id
+      FROM v3_target_snapshot t
+      LEFT JOIN units u ON u.unit_id=t.target_start
+      LEFT JOIN materials m ON m.material_id=u.material_id
       WHERE t.student_id='1320' AND t.target_start IS NOT NULL AND t.target_start<>'' LIMIT 1`),
     env.DB.prepare(`SELECT homework_id FROM v3_homework_snapshot WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 1`),
   ]);
