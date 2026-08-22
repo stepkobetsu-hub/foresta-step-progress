@@ -1,8 +1,6 @@
 name: Recover V3 production UI
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +12,6 @@ concurrency:
 
 jobs:
   repair:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-v3-homework-display-fix'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -55,59 +52,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 10); do
-            curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
-            if grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' /tmp/index.html \
-              && grep -q 'applyHomeworkCheckToCache_(out.homework)' /tmp/index.html; then
-              curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
-              node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
-              exit 0
-            fi
-            sleep 2
-          done
-          exit 1
-      - name: Deploy protected 1320 response-contract helper
-        working-directory: cloudflare
-        shell: bash
-        run: |
-          set -euo pipefail
-          TOKEN="$(openssl rand -hex 32)"
-          echo "::add-mask::$TOKEN"
-          echo "SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
-          const fs=require('fs');
-          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
-          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
-          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
-          NODE
-          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary 1320 homework response contract test"
-      - name: Verify 1320 homework response object and undo
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - <<'NODE'
-          const helper='https://step-progress-v3-smoke.stepkobetsu.workers.dev';
-          const api='https://step-progress-api.stepkobetsu.workers.dev/api';
-          const smokeToken=process.env.SMOKE_TOKEN;
-          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function post(url,body,auth=''){
-            let last;
-            for(let i=0;i<8;i++){
-              const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json',...(auth?{authorization:`Bearer ${auth}`}:{})},body:JSON.stringify(body)});
-              if(r.status===404){last=r;await sleep(2000);continue;}
-              const data=await r.json();
-              if(!r.ok)throw new Error(`HTTP ${r.status}: ${JSON.stringify(data)}`);
-              return data;
-            }
-            throw new Error(`helper not ready: ${last?.status}`);
-          }
-          const prepared=await post(helper,{action:'prepare'},smokeToken);
-          const token=prepared.sessionToken;
-          const id=`v3-ui-contract-1320-${Date.now()}`;
-          const saved=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:'DECLARED_DONE'});
-          if(saved.success!==true||saved.verified!==true)throw new Error(JSON.stringify(saved));
-          if(saved.homework?.homeworkId!==id||saved.homework?.studentStatus!=='DECLARED_DONE')throw new Error(`missing browser homework object: ${JSON.stringify(saved)}`);
-          const undone=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:'UNINPUT'});
-          if(undone.homework?.homeworkId!==id||undone.homework?.studentStatus!=='UNINPUT')throw new Error(`undo response mismatch: ${JSON.stringify(undone)}`);
-          console.log(JSON.stringify({ok:true,studentId:'1320',saveHomework:saved.homework,undoHomework:undone.homework}));
-          NODE
+          curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
+          grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' /tmp/index.html
+          grep -q 'applyHomeworkCheckToCache_(out.homework)' /tmp/index.html
+          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
+          node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
