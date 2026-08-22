@@ -1,1 +1,1 @@
-Use current 1320 homework list for the persistence smoke test.
+Directly validate a new 1320 homework ID saves to D1, reads back, and can be undone.
