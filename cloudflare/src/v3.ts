@@ -14,6 +14,8 @@ const json = (value: unknown, status = 200, headers: Record<string, string> = {}
 const isRow = (value: unknown): value is Row => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown) => String(value ?? "").trim();
 const bool = (value: unknown) => value === true || value === 1 || text(value).toLowerCase() === "true";
+export const normalizeTeacherStatus = (value: unknown) => text(value).toUpperCase() || "UNCONFIRMED";
+export const isHomeworkLocked = (value: unknown) => normalizeTeacherStatus(value) !== "UNCONFIRMED";
 const jstDate = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const elapsed = (started: number) => Math.round(performance.now() - started);
 
@@ -200,30 +202,73 @@ const saveTargetChanges = async (env: V3Env, session: Session, body: Row) => {
 
 const homeworkStudentIds = async (env: V3Env, ids: string[]) => {
   await ensureBootstrap(env);
-  const results=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_id FROM v3_homework_snapshot WHERE homework_id=?").bind(id)));
+  const results=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_id FROM v3_homework_snapshot WHERE homework_id=? UNION SELECT student_id FROM v3_homework_overrides WHERE homework_id=? LIMIT 1").bind(id,id)));
   return new Map(ids.map((id,index)=>[id,text((results[index].results[0] as Row|undefined)?.student_id)]));
 };
 
 const saveHomeworkOverride = async (env: V3Env, session: Session, body: Row, action: string) => {
   const started=performance.now();
+  if(action==="declareHomework"&&session.role!=="STUDENT")return json({success:false,error:"生徒の宿題状態は生徒画面から変更してください。",code:"HOMEWORK_STUDENT_ACTION_FORBIDDEN"},403);
+  if(action!=="declareHomework"&&!['ADMIN','TEACHER'].includes(session.role))return json({success:false,error:"先生確認は講師・管理者だけが変更できます。",code:"HOMEWORK_TEACHER_ACTION_FORBIDDEN"},403);
   const ids=action==="confirmHomeworkGroup"?(Array.isArray(body.homeworkIds)?body.homeworkIds.map(text).filter(Boolean).slice(0,100):[]):[text(body.homeworkId)].filter(Boolean);
   if(!ids.length)return json({success:false,error:"宿題を特定できません。"},400);
   const byId=await homeworkStudentIds(env,ids);
+  if(session.role==="STUDENT"&&action==="declareHomework"){
+    for(const id of ids){if(!byId.get(id))byId.set(id,session.userId);}
+  }
   for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}
   if(action==="declareHomework"){
     const status=text(body.studentStatus)||"UNINPUT",completedDate=status==="DECLARED_DONE"?jstDate():null;
+    if(!['UNINPUT','DECLARED_DONE','NO_TARGET_CLAIM'].includes(status))return json({success:false,error:"生徒の宿題状態が不正です。",code:"INVALID_STUDENT_HOMEWORK_STATUS"},400);
+    const teacherResults=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT teacher_status FROM v3_homework_overrides WHERE student_id=? AND homework_id=?").bind(byId.get(id),id)));
+    if(teacherResults.some((result)=>{const row=result.results[0] as Row|undefined;return row&&isHomeworkLocked(row.teacher_status);}))return json({success:false,error:"先生の確認済みです。変更は先生に伝えてください。",code:"HOMEWORK_ALREADY_CONFIRMED"},409);
     await env.DB.batch(ids.map((id)=>env.DB.prepare(`INSERT INTO v3_homework_overrides(student_id,homework_id,student_status,student_completed_date,updated_at,updated_by) VALUES(?,?,?,?,datetime('now'),?) ON CONFLICT(student_id,homework_id) DO UPDATE SET student_status=excluded.student_status,student_completed_date=excluded.student_completed_date,updated_at=datetime('now'),updated_by=excluded.updated_by`).bind(byId.get(id),id,status,completedDate,session.userId)));
   }else{
     const teacherStatus=action==="confirmHomeworkGroup"?"VERIFIED":text(body.teacherStatus)||"VERIFIED",memo=text(body.confirmationMemo).slice(0,500);
+    if(!['UNCONFIRMED','VERIFIED','NOT_DONE','NOT_APPLICABLE'].includes(teacherStatus))return json({success:false,error:"先生の確認状態が不正です。",code:"INVALID_TEACHER_HOMEWORK_STATUS"},400);
     await env.DB.batch(ids.map((id)=>env.DB.prepare(`INSERT INTO v3_homework_overrides(student_id,homework_id,teacher_status,confirmation_memo,updated_at,updated_by) VALUES(?,?,?,?,datetime('now'),?) ON CONFLICT(student_id,homework_id) DO UPDATE SET teacher_status=excluded.teacher_status,confirmation_memo=excluded.confirmation_memo,updated_at=datetime('now'),updated_by=excluded.updated_by`).bind(byId.get(id),id,teacherStatus,memo,session.userId)));
   }
-  return json({success:true,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
+  const verifyResults=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_status,student_completed_date,teacher_status,confirmation_memo FROM v3_homework_overrides WHERE student_id=? AND homework_id=?").bind(byId.get(id),id)));
+  for(let index=0;index<ids.length;index++){
+    const row=verifyResults[index].results[0] as Row|undefined;
+    if(!row)return json({success:false,error:"宿題の保存確認に失敗しました。",code:"HOMEWORK_WRITE_NOT_FOUND"},500);
+    if(action==="declareHomework"){
+      const expected=text(body.studentStatus)||"UNINPUT";
+      if(text(row.student_status)!==expected)return json({success:false,error:"宿題の保存内容が一致しません。",code:"HOMEWORK_WRITE_MISMATCH"},500);
+    }else{
+      const expected=action==="confirmHomeworkGroup"?"VERIFIED":text(body.teacherStatus)||"VERIFIED";
+      if(text(row.teacher_status)!==expected)return json({success:false,error:"宿題確認の保存内容が一致しません。",code:"HOMEWORK_WRITE_MISMATCH"},500);
+    }
+  }
+  const savedRow=verifyResults[0].results[0] as Row;
+  const homework={
+    homeworkId:ids[0],
+    studentStatus:text(savedRow.student_status)||"UNINPUT",
+    studentCompletedDate:text(savedRow.student_completed_date),
+    teacherStatus:normalizeTeacherStatus(savedRow.teacher_status),
+    confirmationMemo:text(savedRow.confirmation_memo),
+  };
+  return json({success:true,verified:true,homework,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
 };
 
-const overlayHomework=(value:Row,overrides:Row[])=>{
+export const overlayHomework=(value:Row,overrides:Row[])=>{
   const byId=new Map(overrides.map((row)=>[text(row.homework_id),row]));
-  const patch=(item:unknown)=>{if(!isRow(item))return item;const o=byId.get(text(item.homeworkId));if(!o)return item;const out:Row={...item};if(o.student_status!=null)out.studentStatus=text(o.student_status);if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);if(o.teacher_status!=null)out.teacherStatus=text(o.teacher_status);if(o.confirmation_memo!=null)out.confirmationMemo=text(o.confirmation_memo);return out;};
-  const out:Row={...value};if(Array.isArray(value.homework))out.homework=value.homework.map(patch);if(Array.isArray(value.groups))out.groups=value.groups.map((group)=>isRow(group)?{...group,items:Array.isArray(group.items)?group.items.map(patch):group.items}:group);return out;
+  const visit=(node:unknown):unknown=>{
+    if(Array.isArray(node))return node.map(visit);
+    if(!isRow(node))return node;
+    const out:Row={};
+    for(const [key,child] of Object.entries(node))out[key]=visit(child);
+    const id=text(out.homeworkId||out.homework_id);
+    const o=id?byId.get(id):undefined;
+    if(o){
+      if(o.student_status!=null)out.studentStatus=text(o.student_status);
+      if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);
+      out.teacherStatus=normalizeTeacherStatus(o.teacher_status);
+      out.confirmationMemo=text(o.confirmation_memo);
+    }
+    return out;
+  };
+  return visit(value) as Row;
 };
 
 const listHomeworkV3=async(env:V3Env,body:Row)=>{
