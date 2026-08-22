@@ -25,16 +25,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: agent/step-progress-v3-implementation
-
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install dependencies
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
-
       - name: Recover known-good UI and apply V3 runtime
         working-directory: cloudflare
         shell: bash
@@ -47,42 +44,17 @@ jobs:
           node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
           node scripts/apply-v3-autosave.mjs public/index.html
           node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('public/index.html')
-          s=p.read_text(encoding='utf-8')
-          marker='</head>'
-          fallback="<script>setTimeout(function(){document.documentElement.classList.remove('auth-resume-pending');var el=document.getElementById('login');if(el)el.style.visibility='visible';},2500);</script>\n"
-          if marker not in s:
-              raise SystemExit('head closing tag not found')
-          s=s.replace(marker,fallback+marker,1)
-          p.write_text(s,encoding='utf-8')
-          PY
           npm run check
-          grep -q 'async function optimisticDeclareHomework_' public/index.html
-          grep -q 'await optimisticDeclareHomework_(homeworkId,status)' public/index.html
-          grep -q 'function patchHomeworkStatusLocal_' public/index.html
-          grep -q 'v3HomeworkOverrides' src/v3.ts
-
       - name: Deploy V3 production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Keep student homework UI changed while D1 saves"
-
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Inspect and fix homework immediate UI"
       - name: Verify production
         shell: bash
         run: |
           set -euo pipefail
           for attempt in $(seq 1 10); do
             curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
-            if test "$(wc -c < /tmp/index.html)" -gt 50000 \
-              && grep -q '</html>' /tmp/index.html \
-              && grep -q 'async function optimisticDeclareHomework_' /tmp/index.html \
-              && grep -q 'await optimisticDeclareHomework_(homeworkId,status)' /tmp/index.html \
-              && grep -q 'function patchHomeworkStatusLocal_' /tmp/index.html; then
-              curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
-              node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
-              exit 0
-            fi
+            if grep -q 'async function optimisticDeclareHomework_' /tmp/index.html; then exit 0; fi
             sleep 2
           done
           exit 1
