@@ -1,0 +1,35 @@
+name: Inspect 1320 homework persistence
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-inspect-1320-homework'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Inspect recent 1320 homework overrides
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- recent 1320 overrides ---'
+          npx wrangler d1 execute step-progress-db --remote --command "SELECT homework_id,student_status,student_completed_date,teacher_status,updated_at,updated_by FROM v3_homework_overrides WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 30;"
+          echo '--- recent 1320 snapshot rows ---'
+          npx wrangler d1 execute step-progress-db --remote --command "SELECT homework_id,status,assigned_date,due_date,updated_at FROM v3_homework_snapshot WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 20;"
