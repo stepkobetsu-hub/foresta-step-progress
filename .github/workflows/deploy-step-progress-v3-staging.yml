@@ -37,6 +37,10 @@ jobs:
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
 
+      - name: Apply V3 runtime save fast path
+        working-directory: cloudflare
+        run: node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+
       - name: Verify TypeScript
         working-directory: cloudflare
         run: npm run check
@@ -126,14 +130,7 @@ jobs:
           if(inspected.data.homework?.student_status!=='DECLARED_DONE')throw new Error('homework did not persist in V3 D1');
           if(Boolean(Number(inspected.data.progress?.point_confirmed))!==toggledPoint)throw new Error('progress inspect mismatch');
           if(Boolean(Number(inspected.data.target?.included))!==toggledTarget)throw new Error('target inspect mismatch');
-          console.log(JSON.stringify({
-            ok:true,
-            studentId:'1320',
-            progress:{serverMs:Number(progress.data.elapsedMs),wallMs:progress.wallMs},
-            target:{serverMs:Number(target.data.elapsedMs),wallMs:target.wallMs},
-            homework:{serverMs:Number(homework.data.elapsedMs),wallMs:homework.wallMs},
-            reloadVerified:true
-          }));
+          console.log(JSON.stringify({ok:true,studentId:'1320',progress:{serverMs:Number(progress.data.elapsedMs),wallMs:progress.wallMs},target:{serverMs:Number(target.data.elapsedMs),wallMs:target.wallMs},homework:{serverMs:Number(homework.data.elapsedMs),wallMs:homework.wallMs},reloadVerified:true}));
           NODE
 
       - name: Final health check
