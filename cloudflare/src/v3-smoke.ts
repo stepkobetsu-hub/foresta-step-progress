@@ -75,8 +75,28 @@ const inspect = async (env: SmokeEnv, body: Row) => {
   return json({ ok: true, progress: progress.results[0] || null, target: target.results[0] || null, homework: homework.results[0] || null });
 };
 
+const publicStatus = async (env: SmokeEnv) => {
+  const [meta, targetOverrides, homeworkOverrides, archives, sessions] = await env.DB.batch([
+    env.DB.prepare(`SELECT value FROM v3_meta WHERE key='final_snapshot_at'`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_target_overrides`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_homework_overrides`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_homework_group_archives`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_sessions`),
+  ]);
+  const count = (result: D1Result<unknown>) => Number((result.results[0] as Row | undefined)?.count || 0);
+  return json({
+    ok: true,
+    finalSnapshotAt: text((meta.results[0] as Row | undefined)?.value),
+    targetOverrideCount: count(targetOverrides),
+    homeworkOverrideCount: count(homeworkOverrides),
+    archiveOverrideCount: count(archives),
+    sessionCount: count(sessions),
+  });
+};
+
 const finalize = async (env: SmokeEnv) => {
   const started = performance.now();
+  const snapshotAt = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM v3_progress_records`),
     env.DB.prepare(`INSERT INTO v3_progress_records(record_id,student_id,material_id,subject,grade,unit_id,round,point_confirmed,warmup_confirmed,try_completed,memorization_completed,exercise_completed,lct_result,learning_date,updated_at,updated_by,version,request_id)
@@ -92,6 +112,7 @@ const finalize = async (env: SmokeEnv) => {
     env.DB.prepare(`DELETE FROM v3_homework_group_archives`),
     env.DB.prepare(`DELETE FROM v3_sessions`),
     env.DB.prepare(`INSERT INTO v3_meta(key,value,updated_at) VALUES('bootstrap_complete','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value='1',updated_at=datetime('now')`),
+    env.DB.prepare(`INSERT INTO v3_meta(key,value,updated_at) VALUES('final_snapshot_at',?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')`).bind(snapshotAt),
   ]);
   const [students, progress, targets, homework] = await env.DB.batch([
     env.DB.prepare(`SELECT COUNT(*) AS count FROM students`),
@@ -102,6 +123,7 @@ const finalize = async (env: SmokeEnv) => {
   const count = (result: D1Result<unknown>) => Number((result.results[0] as Row | undefined)?.count || 0);
   return json({
     ok: true,
+    finalSnapshotAt: snapshotAt,
     studentCount: count(students),
     progressCount: count(progress),
     targetCount: count(targets),
@@ -112,6 +134,8 @@ const finalize = async (env: SmokeEnv) => {
 
 export default {
   async fetch(request: Request, env: SmokeEnv): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/status") return publicStatus(env);
     if (!authorized(request, env)) return json({ error: "NOT_FOUND" }, 404);
     if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     const value: unknown = await request.json().catch(() => null);
