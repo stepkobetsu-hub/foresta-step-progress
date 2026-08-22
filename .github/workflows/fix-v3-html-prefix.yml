@@ -1,8 +1,6 @@
 name: Recover V3 production UI
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +12,6 @@ concurrency:
 
 jobs:
   repair:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-v3-homework-display-fix'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
