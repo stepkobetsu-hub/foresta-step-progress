@@ -32,7 +32,7 @@ const patchScript = `<script>
     if(status==='NO_TARGET_CLAIM')return out;
     const id=esc(homeworkId),kind=esc(type),done=status==='DECLARED_DONE';
     const dateHtml=done&&date?\`<span class="homeDoneDate">\${formatShortDate_(date)}</span>\`:'';
-    const control=\`<label class="homeDoneCheck"><input type="checkbox" data-home-check data-home="\${id}" data-home-type="\${kind}" \${done?'checked':''}><span>宿題済み</span>\${dateHtml}</label>\`;
+    const control=\`<label class="homeDoneCheck"><input type="checkbox" data-home-check data-home="\${id}" data-home-type="\${kind}" \${done?'checked':''}><span>\${done?'宿題済み':'チェック'}</span>\${dateHtml}</label>\`;
     if(done)out=out.replace(/<button class="homeDone"[\\s\\S]*?<\\/button>/,control);
     else out=out.replace(/<button([^>]*)>やりました<\\/button>/,control);
     return out;
@@ -63,9 +63,9 @@ if (!html.includes(marker)) {
   html = html.replace('</body>', `${patchScript}</body>`);
 }
 
-for (const needle of [marker,'data-home-check','type="checkbox"','宿題済み',"action.checked?'DECLARED_DONE':'UNINPUT'"]) {
+for (const needle of [marker,'data-home-check','type="checkbox"','チェック','宿題済み',"action.checked?'DECLARED_DONE':'UNINPUT'"]) {
   if (!html.includes(needle)) throw new Error(`homework checkbox patch missing: ${needle}`);
 }
 
 fs.writeFileSync(htmlFile, html);
-console.log('Injected student homework checkbox UI; checked=DECLARED_DONE unchecked=UNINPUT');
+console.log('Injected student homework checkbox UI; unchecked label=チェック checked label=宿題済み');
