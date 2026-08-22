@@ -4,7 +4,6 @@ const [,, serverFile = 'src/v3.ts', htmlFile = 'public/index.html'] = process.ar
 let server = fs.readFileSync(serverFile, 'utf8');
 let html = fs.readFileSync(htmlFile, 'utf8');
 
-// Expose the exact D1 homework overrides alongside the Google-derived structure.
 const serverNeedle = 'const patched=overlayHomework(value,overrideResult.results.filter(isRow));\n  const archivedGroupKeys=archiveResult.results.filter(isRow).map((row)=>text(row.group_key));\n  patched.archivedGroupKeys=archivedGroupKeys;patched.source="GOOGLE_STRUCTURE_D1_V3_STATE";\n  if(isRow(patched.data)){patched.data={...patched.data,archivedGroupKeys,source:"GOOGLE_STRUCTURE_D1_V3_STATE"};}\n  return json(patched,upstream.status,{"x-data-source":"google-structure+d1-v3-state"});';
 if (!server.includes(serverNeedle)) throw new Error('server homework list return point not found');
 const serverReplacement = 'const v3HomeworkOverrides=overrideResult.results.filter(isRow);\n  const patched=overlayHomework(value,v3HomeworkOverrides);\n  const archivedGroupKeys=archiveResult.results.filter(isRow).map((row)=>text(row.group_key));\n  patched.archivedGroupKeys=archivedGroupKeys;patched.v3HomeworkOverrides=v3HomeworkOverrides;patched.source="GOOGLE_STRUCTURE_D1_V3_STATE";\n  if(isRow(patched.data)){patched.data={...patched.data,archivedGroupKeys,v3HomeworkOverrides,source:"GOOGLE_STRUCTURE_D1_V3_STATE"};}\n  return json(patched,upstream.status,{"x-data-source":"google-structure+d1-v3-state"});';
@@ -19,17 +18,17 @@ const renderReplacement = helper + "async function renderStudentHomework_(){if(!
 html = html.replace(renderNeedle, renderReplacement);
 html = html.replaceAll("state.homeworkCache=await call('listHomework')", "state.homeworkCache=applyV3HomeworkOverridesClient_(await call('listHomework'))");
 
-// Replace the student's direct save call with an optimistic local update. The
-// old handler then re-renders from the already-updated cache, so the button no
-// longer flashes back to its previous state while D1 is saving.
 const directCall = "await call('declareHomework',{homeworkId,studentStatus:status})";
-if (!html.includes(directCall)) {
+const rawIndex=html.indexOf(directCall);
+if (rawIndex < 0) {
   const index=html.indexOf("declareHomework");
   throw new Error('student declareHomework call not found near: '+(index>=0?html.slice(Math.max(0,index-220),index+420):'none'));
 }
+console.log('HOMEWORK_HANDLER_CONTEXT_START');
+console.log(html.slice(Math.max(0,rawIndex-900),rawIndex+1500));
+console.log('HOMEWORK_HANDLER_CONTEXT_END');
 html = html.replace(directCall, "await optimisticDeclareHomework_(homeworkId,status)");
 
-// Do not discard the optimistic cache immediately after a successful save.
 const optimisticIndex=html.indexOf("await optimisticDeclareHomework_(homeworkId,status)");
 if (optimisticIndex < 0) throw new Error('optimistic homework call missing after replacement');
 const tail=html.slice(optimisticIndex,optimisticIndex+700);
