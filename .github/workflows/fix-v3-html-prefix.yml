@@ -1,6 +1,8 @@
 name: Recover V3 production UI
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -12,6 +14,7 @@ concurrency:
 
 jobs:
   repair:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-v3-homework-display-fix'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -43,6 +46,7 @@ jobs:
           grep -q '</html>' public/index.html
           node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
           node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
           python - <<'PY'
           from pathlib import Path
           p=Path('public/index.html')
@@ -55,10 +59,13 @@ jobs:
           p.write_text(s,encoding='utf-8')
           PY
           npm run check
+          grep -q 'function applyV3HomeworkOverridesClient_' public/index.html
+          grep -q "state.homeworkCache=applyV3HomeworkOverridesClient_(await call('listHomework'))" public/index.html
+          grep -q 'v3HomeworkOverrides' src/v3.ts
 
       - name: Deploy V3 production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Manual V3 UI recovery"
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Force D1 homework state into browser rendering"
 
       - name: Verify production
         shell: bash
@@ -67,5 +74,7 @@ jobs:
           curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
           test "$(wc -c < /tmp/index.html)" -gt 50000
           grep -q '</html>' /tmp/index.html
+          grep -q 'function applyV3HomeworkOverridesClient_' /tmp/index.html
+          grep -q "state.homeworkCache=applyV3HomeworkOverridesClient_(await call('listHomework'))" /tmp/index.html
           curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
           node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
