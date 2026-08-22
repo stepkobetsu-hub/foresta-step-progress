@@ -1,12 +1,6 @@
 name: Deploy step-progress V3 staging
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/deploy-step-progress-v3-staging.yml
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
