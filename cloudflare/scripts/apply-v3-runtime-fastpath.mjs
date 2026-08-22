@@ -55,5 +55,20 @@ const targetReplacement = `  const targets = targetResult.results.filter(isRow).
   const selectableResult =`;
 src = src.replace(targetNeedle, targetReplacement);
 
+// listHomework is still built from the current Google structure. A newly
+// generated homework row may therefore have an ID that was not present in the
+// cutover snapshot. For a STUDENT declareHomework request the authenticated
+// session itself is the authoritative owner, so allow that new ID to be stored
+// directly in the V3 override table instead of rejecting it as unknown.
+const homeworkOwnerNeedle = `  const byId=await homeworkStudentIds(env,ids);
+  for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
+if (!src.includes(homeworkOwnerNeedle)) throw new Error('Homework owner validation point not found');
+const homeworkOwnerReplacement = `  const byId=await homeworkStudentIds(env,ids);
+  if(session.role==="STUDENT"&&action==="declareHomework"){
+    for(const id of ids){if(!byId.get(id))byId.set(id,session.userId);}
+  }
+  for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
+src = src.replace(homeworkOwnerNeedle, homeworkOwnerReplacement);
+
 fs.writeFileSync(file, src);
-console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity`);
+console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity; enabled dynamic student homework IDs`);
