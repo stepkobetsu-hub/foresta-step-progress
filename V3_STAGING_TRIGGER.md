@@ -1,7 +1,6 @@
-# V3 staging validation trigger
+# V3 production cutover trigger
 
-This branch exists only to trigger the isolated V3 staging deployment workflow.
-It must not be merged into production. The workflow explicitly checks out `agent/step-progress-v3-implementation` and deploys only `step-progress-v3-staging`.
+This branch is used only to trigger the one-time V3 production cutover workflow.
+It must not be merged into production.
 
-Final smoke validation trigger after target reload and helper propagation fixes.
-Status: ready for one final PR-triggered run.
+Cutover sequence: record rollback deployment -> final V3 snapshot -> deploy V3 to the existing step-progress-api URL -> verify health.
