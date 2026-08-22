@@ -9,6 +9,29 @@ if (!server.includes(serverNeedle)) throw new Error('server homework list return
 const serverReplacement = 'const v3HomeworkOverrides=overrideResult.results.filter(isRow);\n  const patched=overlayHomework(value,v3HomeworkOverrides);\n  const archivedGroupKeys=archiveResult.results.filter(isRow).map((row)=>text(row.group_key));\n  patched.archivedGroupKeys=archivedGroupKeys;patched.v3HomeworkOverrides=v3HomeworkOverrides;patched.source="GOOGLE_STRUCTURE_D1_V3_STATE";\n  if(isRow(patched.data)){patched.data={...patched.data,archivedGroupKeys,v3HomeworkOverrides,source:"GOOGLE_STRUCTURE_D1_V3_STATE"};}\n  return json(patched,upstream.status,{"x-data-source":"google-structure+d1-v3-state"});';
 server = server.replace(serverNeedle, serverReplacement);
 
+// IMPORTANT: replace the REAL student click handler before inserting the helper.
+// The previous version inserted the helper first, then replaced the first matching
+// declareHomework call, which accidentally changed the helper itself and left the
+// real click handler untouched.
+const directCall = "await call('declareHomework',{homeworkId,studentStatus:status})";
+const directCount = html.split(directCall).length - 1;
+if (directCount !== 1) throw new Error(`expected exactly one real student declareHomework call before helper insertion, found ${directCount}`);
+const rawIndex = html.indexOf(directCall);
+console.log('REAL_HOMEWORK_HANDLER_CONTEXT_START');
+console.log(html.slice(Math.max(0,rawIndex-1000),rawIndex+1800));
+console.log('REAL_HOMEWORK_HANDLER_CONTEXT_END');
+html = html.replace(directCall, "await optimisticDeclareHomework_(homeworkId,status)");
+
+// Do not throw away the locally-updated homework state immediately after save.
+const realOptimisticIndex=html.indexOf("await optimisticDeclareHomework_(homeworkId,status)");
+if (realOptimisticIndex < 0) throw new Error('real optimistic homework call missing');
+const realTail=html.slice(realOptimisticIndex,realOptimisticIndex+900);
+const nullOffset=realTail.indexOf('state.homeworkCache=null;');
+if (nullOffset >= 0) {
+  const absolute=realOptimisticIndex+nullOffset;
+  html=html.slice(0,absolute)+html.slice(absolute+'state.homeworkCache=null;'.length);
+}
+
 const renderNeedle = "async function renderStudentHomework_(){if(!state.homeworkCache)state.homeworkCache=await call('listHomework');const home=state.homeworkCache";
 if (!html.includes(renderNeedle)) throw new Error('student homework render point not found');
 
@@ -18,33 +41,17 @@ const renderReplacement = helper + "async function renderStudentHomework_(){if(!
 html = html.replace(renderNeedle, renderReplacement);
 html = html.replaceAll("state.homeworkCache=await call('listHomework')", "state.homeworkCache=applyV3HomeworkOverridesClient_(await call('listHomework'))");
 
-const directCall = "await call('declareHomework',{homeworkId,studentStatus:status})";
-const rawIndex=html.indexOf(directCall);
-if (rawIndex < 0) {
-  const index=html.indexOf("declareHomework");
-  throw new Error('student declareHomework call not found near: '+(index>=0?html.slice(Math.max(0,index-220),index+420):'none'));
-}
-console.log('HOMEWORK_HANDLER_CONTEXT_START');
-console.log(html.slice(Math.max(0,rawIndex-900),rawIndex+1500));
-console.log('HOMEWORK_HANDLER_CONTEXT_END');
-html = html.replace(directCall, "await optimisticDeclareHomework_(homeworkId,status)");
-
-const optimisticIndex=html.indexOf("await optimisticDeclareHomework_(homeworkId,status)");
-if (optimisticIndex < 0) throw new Error('optimistic homework call missing after replacement');
-const tail=html.slice(optimisticIndex,optimisticIndex+700);
-const nullOffset=tail.indexOf('state.homeworkCache=null;');
-if (nullOffset >= 0) {
-  const absolute=optimisticIndex+nullOffset;
-  html=html.slice(0,absolute)+html.slice(absolute+'state.homeworkCache=null;'.length);
-}
-
+// Validate that the real handler is optimistic AND the helper still performs the
+// actual API call. This catches the exact bug that caused the previous false fix.
+if (!html.includes('await optimisticDeclareHomework_(homeworkId,status)')) throw new Error('real student homework click is not optimistic');
+if (!html.includes("try{return await call('declareHomework',{homeworkId,studentStatus:status});}")) throw new Error('optimistic helper lost its real API call');
+const finalDirectCount = html.split(directCall).length - 1;
+if (finalDirectCount !== 1) throw new Error(`expected only helper API call after patch, found ${finalDirectCount}`);
 if (!server.includes('v3HomeworkOverrides=v3HomeworkOverrides')) throw new Error('server override exposure missing');
 if (!html.includes('function applyV3HomeworkOverridesClient_')) throw new Error('browser override helper missing');
 if (!html.includes('function patchHomeworkStatusLocal_')) throw new Error('local homework patch helper missing');
 if (!html.includes('async function optimisticDeclareHomework_')) throw new Error('optimistic homework helper missing');
-if (!html.includes('await optimisticDeclareHomework_(homeworkId,status)')) throw new Error('student homework click is not optimistic');
-if (!html.includes("state.homeworkCache=applyV3HomeworkOverridesClient_(await call('listHomework'))")) throw new Error('browser homework fetch is not overlaying D1 state');
 
 fs.writeFileSync(serverFile, server);
 fs.writeFileSync(htmlFile, html);
-console.log('Applied D1 homework overlay and optimistic student homework UI update');
+console.log('Fixed real student homework click handler: optimistic UI now targets the actual click path');
