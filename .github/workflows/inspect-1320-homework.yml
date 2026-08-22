@@ -24,12 +24,30 @@ jobs:
       - name: Install
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
-      - name: Inspect recent 1320 homework overrides
+      - name: Deploy protected inspector and read recent 1320 rows
         working-directory: cloudflare
         shell: bash
         run: |
           set -euo pipefail
-          echo '--- recent 1320 overrides ---'
-          npx wrangler d1 execute step-progress-db --remote --command "SELECT homework_id,student_status,student_completed_date,teacher_status,updated_at,updated_by FROM v3_homework_overrides WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 30;"
-          echo '--- recent 1320 snapshot rows ---'
-          npx wrangler d1 execute step-progress-db --remote --command "SELECT homework_id,status,assigned_date,due_date,updated_at FROM v3_homework_snapshot WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 20;"
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected 1320 persistence inspector"
+          sleep 3
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d '{"action":"inspectRecent1320"}' \
+            https://step-progress-v3-smoke.stepkobetsu.workers.dev | tee /tmp/inspect.json
+          node - <<'NODE'
+          const d=require('/tmp/inspect.json');
+          console.log('RECENT_OVERRIDES');
+          for (const r of d.overrides||[]) console.log(JSON.stringify(r));
+          console.log('RECENT_SNAPSHOT');
+          for (const r of d.snapshot||[]) console.log(JSON.stringify(r));
+          NODE
