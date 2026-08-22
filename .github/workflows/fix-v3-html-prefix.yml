@@ -66,13 +66,12 @@ jobs:
           p.write_text(s,encoding='utf-8')
           PY
           npm run check
-          grep -q 'enabled dynamic student homework IDs' <(node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts 2>&1 || true) || true
           test "$(wc -c < public/index.html)" -gt 50000
           grep -q '</html>' public/index.html
 
       - name: Deploy homework persistence fix to production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Allow current 1320 homework IDs to persist in V3"
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Persist and verify current student homework checks in V3"
 
       - name: Verify production page and V3 health
         shell: bash
@@ -98,9 +97,9 @@ jobs:
           c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
           fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
           NODE
-          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected 1320 homework persistence test helper"
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected 1320 dynamic homework test helper"
 
-      - name: Test current 1320 homework check save and reload
+      - name: Test 1320 dynamic homework save readback and undo
         shell: bash
         run: |
           set -euo pipefail
@@ -119,31 +118,15 @@ jobs:
           const prepared=await post(helper,{action:'prepare'},smokeToken);
           if(prepared.data.ok!==true) throw new Error(JSON.stringify(prepared.data));
           const token=prepared.data.sessionToken;
-          const first=await post(api,{action:'listHomework',token});
-          if(first.data.success!==true) throw new Error(`listHomework failed: ${JSON.stringify(first.data)}`);
-          const flatten=value=>{
-            const flat=Array.isArray(value.homework)?value.homework:[];
-            const grouped=Array.isArray(value.groups)?value.groups.flatMap(g=>Array.isArray(g.items)?g.items:[]):[];
-            const all=[...flat,...grouped];
-            const seen=new Set();
-            return all.filter(x=>x&&x.homeworkId&&!seen.has(String(x.homeworkId))&&seen.add(String(x.homeworkId)));
-          };
-          const items=flatten(first.data);
-          const item=items.find(x=>String(x.teacherStatus||'UNCONFIRMED')==='UNCONFIRMED')||items[0];
-          if(!item) throw new Error('1320 has no current homework item to test');
-          const id=String(item.homeworkId);
-          const original=String(item.studentStatus||'UNINPUT');
-          const changed=original==='DECLARED_DONE'?'UNINPUT':'DECLARED_DONE';
-          const saved=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:changed});
-          if(saved.data.success!==true) throw new Error(`declareHomework failed: ${JSON.stringify(saved.data)}`);
-          if(Number(saved.data.elapsedMs||0)>=2000) throw new Error(`homework save too slow: ${saved.data.elapsedMs}ms`);
-          const second=await post(api,{action:'listHomework',token});
-          const after=flatten(second.data).find(x=>String(x.homeworkId)===id);
-          if(!after||String(after.studentStatus)!==changed) throw new Error(`homework did not survive reload: wanted ${changed}, got ${after?.studentStatus}`);
-          const restored=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:original});
-          if(restored.data.success!==true) throw new Error('homework restore failed');
-          const third=await post(api,{action:'listHomework',token});
-          const final=flatten(third.data).find(x=>String(x.homeworkId)===id);
-          if(!final||String(final.studentStatus)!==original) throw new Error(`homework restore did not survive reload: wanted ${original}, got ${final?.studentStatus}`);
-          console.log(JSON.stringify({ok:true,studentId:'1320',homeworkId:id,originalStatus:original,testStatus:changed,serverMs:Number(saved.data.elapsedMs||0),wallMs:saved.wallMs,reloadVerified:true,restored:true}));
+          const id=`v3-dynamic-1320-${Date.now()}`;
+          const saved=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:'DECLARED_DONE'});
+          if(saved.data.success!==true||saved.data.verified!==true) throw new Error(`dynamic homework save failed: ${JSON.stringify(saved.data)}`);
+          if(Number(saved.data.elapsedMs||0)>=2000) throw new Error(`dynamic homework save too slow: ${saved.data.elapsedMs}ms`);
+          const inspected=await post(helper,{action:'inspect',homeworkId:id},smokeToken);
+          if(inspected.data.homework?.student_status!=='DECLARED_DONE') throw new Error(`dynamic homework readback mismatch: ${JSON.stringify(inspected.data.homework)}`);
+          const undone=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:'UNINPUT'});
+          if(undone.data.success!==true||undone.data.verified!==true) throw new Error(`dynamic homework undo failed: ${JSON.stringify(undone.data)}`);
+          const inspectedUndo=await post(helper,{action:'inspect',homeworkId:id},smokeToken);
+          if(inspectedUndo.data.homework?.student_status!=='UNINPUT') throw new Error(`dynamic homework undo readback mismatch: ${JSON.stringify(inspectedUndo.data.homework)}`);
+          console.log(JSON.stringify({ok:true,studentId:'1320',dynamicHomeworkId:id,serverMs:Number(saved.data.elapsedMs||0),wallMs:saved.wallMs,saveReadbackVerified:true,undoReadbackVerified:true}));
           NODE
