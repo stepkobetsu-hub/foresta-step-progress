@@ -4,6 +4,9 @@ type Row = Record<string, unknown>;
 
 const text = (value: unknown) => String(value ?? "").trim();
 const truthy = (value: unknown) => value === true || value === 1 || text(value).toLowerCase() === "true";
+const normalizeSeries = (value: unknown) => text(value) || "FORESTA_STEP";
+const unitKey = (subject: unknown, series: unknown, unitId: unknown) =>
+  `${text(subject)}|${normalizeSeries(series)}|${text(unitId)}`;
 const seriesLabel = (series: string) => ({
   FORESTA_GOAL: "フォレスタゴール",
   VOCABULARY: "フォレスタ英単語",
@@ -31,13 +34,19 @@ const progressState = (row: Row | undefined, roundNumber: number) => ({
 
 export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[], homework: Row[], selectable: Row[]) => {
   const summary = buildDashboardSummary(targets, progress, homework);
-  const targetIds = new Set(targets.filter((row) => truthy(row.included)).map((row) => text(row.unit_id)));
-  const progressByKey = new Map(progress.map((row) => [`${text(row.unit_id)}:${Number(row.round) || 1}`, row]));
+  const targetKeys = new Set(targets
+    .filter((row) => truthy(row.included))
+    .map((row) => unitKey(row.subject, row.series, row.unit_id)));
+  const progressByKey = new Map(progress.map((row) => [
+    `${unitKey(row.subject, row.series, row.unit_id)}:${Number(row.round) || 1}`,
+    row,
+  ]));
   const mapUnit = (unit: Row) => {
     const unitId = text(unit.unit_id);
-    const series = text(unit.series) || "FORESTA_STEP";
+    const series = normalizeSeries(unit.series);
     const subject = text(unit.subject);
-    const rounds = [1, 2, 3].map((round) => progressState(progressByKey.get(`${unitId}:${round}`), round));
+    const key = unitKey(subject, series, unitId);
+    const rounds = [1, 2, 3].map((round) => progressState(progressByKey.get(`${key}:${round}`), round));
     return {
       unitId,
       subject,
@@ -55,7 +64,9 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
     };
   };
   const allUnits = selectable.map(mapUnit);
-  const progressIds = new Set(progress.map((row) => text(row.unit_id)));
+  const keyForUnit = (unit: { subject: string; series: string; unitId: string }) =>
+    unitKey(unit.subject, unit.series, unit.unitId);
+  const progressKeys = new Set(progress.map((row) => unitKey(row.subject, row.series, row.unit_id)));
   const newest = progress.map((row) => text(row.updated_at)).filter(Boolean).sort().pop() || "";
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
   const todayProgress = progress.filter((row) => text(row.learning_date).slice(0, 10) === today);
@@ -92,7 +103,8 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
       unconfirmedCount: homework.filter((row) => ["UNINPUT", "UNCONFIRMED"].includes(text(row.status || row.teacher_status))).length,
     },
     today: {
-      learnedUnitCount: new Set(todayProgress.map((row) => `${text(row.unit_id)}:${Number(row.round) || 1}`)).size,
+      learnedUnitCount: new Set(todayProgress.map((row) =>
+        `${unitKey(row.subject, row.series, row.unit_id)}:${Number(row.round) || 1}`)).size,
       tryCompletedCount: todayProgress.filter((row) => truthy(row.try_completed)).length,
       homeworkUnitCount: 0,
       homeworkItemCount: 0,
@@ -100,9 +112,9 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
       subjects: [],
     },
     newMilestone: null,
-    units: allUnits.filter((unit) => targetIds.has(unit.unitId)),
-    outsideTargetUnits: allUnits.filter((unit) => !targetIds.has(unit.unitId) && progressIds.has(unit.unitId)),
-    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetIds.has(unit.unitId) })),
+    units: allUnits.filter((unit) => targetKeys.has(keyForUnit(unit))),
+    outsideTargetUnits: allUnits.filter((unit) => !targetKeys.has(keyForUnit(unit)) && progressKeys.has(keyForUnit(unit))),
+    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetKeys.has(keyForUnit(unit)) })),
     lastStudentInputAt: newest,
     achievements: { earned: [], next: null },
   };
