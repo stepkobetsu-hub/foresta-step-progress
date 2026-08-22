@@ -14,12 +14,40 @@ html = html
 // Homework changes every time the student checks an item. Never restore a
 // homework list from localStorage after reload; only dashboard data is cached.
 const loadHomeworkNeedle = 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null';
-if (!html.includes(loadHomeworkNeedle)) throw new Error('student homework cache load point not found');
+if (!html.includes(loadHomeworkNeedle) && !html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCache=null')) {
+  throw new Error('student homework cache load point not found');
+}
 html = html.replace(loadHomeworkNeedle, 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=null');
 
 const saveHomeworkNeedle = 'dashboard:state.dashboardCache,homework:state.homeworkCache';
-if (!html.includes(saveHomeworkNeedle)) throw new Error('student homework cache save point not found');
+if (!html.includes(saveHomeworkNeedle) && !html.includes('dashboard:state.dashboardCache,homework:null')) {
+  throw new Error('student homework cache save point not found');
+}
 html = html.replace(saveHomeworkNeedle, 'dashboard:state.dashboardCache,homework:null');
+
+// The progress hero must not wait for the Google-backed homework list. On the
+// first student screen start the D1 dashboard request immediately in parallel.
+// If the dashboard wins the race, render the graph at once and let homework
+// continue loading underneath it.
+const landingNeedle = 'let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;';
+const landingPatch = `${landingNeedle}\n    if(state.studentLandingPending&&needsHomework&&needsDashboard){scheduleBackground_(()=>loadDashboardInBackground_(),0);needsDashboard=false}\n    if(state.studentLandingPending&&state.dashboardCache&&!state.homeworkCache){state.studentLandingPending=false;needsHomework=false}`;
+if (html.includes(landingNeedle) && !html.includes('scheduleBackground_(()=>loadDashboardInBackground_(),0);needsDashboard=false')) {
+  html = html.replace(landingNeedle, landingPatch);
+}
+if (!html.includes('scheduleBackground_(()=>loadDashboardInBackground_(),0);needsDashboard=false')) {
+  throw new Error('parallel dashboard start patch missing');
+}
+
+// A slower homework request may finish just after the graph has rendered. Do
+// not replace the graph with the temporary homework-only shell in that race.
+const homeworkRaceNeedle = `      if(state.homeworkCache){\n        state.studentLandingPending=false;await renderStudentHomeworkOnly_();`;
+const homeworkRacePatch = `      if(state.homeworkCache){\n        if(state.dashboardCache){state.studentLandingPending=false;await renderStudent();return}\n        state.studentLandingPending=false;await renderStudentHomeworkOnly_();`;
+if (html.includes(homeworkRaceNeedle) && !html.includes('if(state.dashboardCache){state.studentLandingPending=false;await renderStudent();return}')) {
+  html = html.replace(homeworkRaceNeedle, homeworkRacePatch);
+}
+if (!html.includes('if(state.dashboardCache){state.studentLandingPending=false;await renderStudent();return}')) {
+  throw new Error('dashboard/homework race patch missing');
+}
 
 // Clear any old persisted view cache after a homework declaration. Older UI
 // revisions vary slightly here, so use a tolerant replacement and do not make
@@ -41,4 +69,4 @@ if (!html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCa
 if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Error('homework is still persisted in student view cache');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; autosave progress=300ms target=350ms; stale homework cache disabled');
+console.log('Sanitized V3 HTML; graph loads in parallel with homework; autosave progress=300ms target=350ms');
