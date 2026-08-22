@@ -70,5 +70,32 @@ const homeworkOwnerReplacement = `  const byId=await homeworkStudentIds(env,ids)
   for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
 src = src.replace(homeworkOwnerNeedle, homeworkOwnerReplacement);
 
+// Never report a homework save as successful until D1 returns the state that
+// was just requested. This keeps an optimistic UI from silently reverting.
+const homeworkReturnNeedle = `  }
+  return json({success:true,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
+};
+
+const overlayHomework=`;
+if (!src.includes(homeworkReturnNeedle)) throw new Error('Homework save return point not found');
+const homeworkReturnReplacement = `  }
+  const verifyResults=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_status,teacher_status FROM v3_homework_overrides WHERE student_id=? AND homework_id=?").bind(byId.get(id),id)));
+  for(let index=0;index<ids.length;index++){
+    const row=verifyResults[index].results[0] as Row|undefined;
+    if(!row)return json({success:false,error:"宿題の保存確認に失敗しました。",code:"HOMEWORK_WRITE_NOT_FOUND"},500);
+    if(action==="declareHomework"){
+      const expected=text(body.studentStatus)||"UNINPUT";
+      if(text(row.student_status)!==expected)return json({success:false,error:"宿題の保存内容が一致しません。",code:"HOMEWORK_WRITE_MISMATCH"},500);
+    }else{
+      const expected=action==="confirmHomeworkGroup"?"VERIFIED":text(body.teacherStatus)||"VERIFIED";
+      if(text(row.teacher_status)!==expected)return json({success:false,error:"宿題確認の保存内容が一致しません。",code:"HOMEWORK_WRITE_MISMATCH"},500);
+    }
+  }
+  return json({success:true,verified:true,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
+};
+
+const overlayHomework=`;
+src = src.replace(homeworkReturnNeedle, homeworkReturnReplacement);
+
 fs.writeFileSync(file, src);
-console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity; enabled dynamic student homework IDs`);
+console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity; enabled dynamic student homework IDs; verified homework writes`);
