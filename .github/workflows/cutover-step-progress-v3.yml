@@ -1,8 +1,6 @@
 name: Cut over step-progress to V3
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
