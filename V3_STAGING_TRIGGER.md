@@ -4,3 +4,4 @@ This branch exists only to trigger the isolated V3 staging deployment workflow.
 It must not be merged into production. The workflow explicitly checks out `agent/step-progress-v3-implementation` and deploys only `step-progress-v3-staging`.
 
 Final smoke validation trigger after target reload and helper propagation fixes.
+Status: ready for one final PR-triggered run.
