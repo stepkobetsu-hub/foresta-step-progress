@@ -1,0 +1,1 @@
+Homework preservation audit 2026-08-22: legacy homework_records and v3_homework_snapshot matched exactly for all 2271 rows. Missing legacy=0, missing V3=0, status mismatches=0. All 14 current v3_homework_overrides belonged to dummy student 1320. Suspicious real-student done-to-undone downgrades=0.
