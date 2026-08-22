@@ -77,7 +77,14 @@ jobs:
           },null,2));
           NODE
           npx wrangler deploy --config wrangler.speed-probe.json --message "Temporary protected dashboard speed probe"
-          curl --fail --silent --show-error -H "Authorization: Bearer $PROBE_TOKEN" https://step-progress-v3-speed-probe.stepkobetsu.workers.dev/ -o /tmp/probe-session.json
+          code=000
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/probe-session.json -w '%{http_code}' -H "Authorization: Bearer $PROBE_TOKEN" https://step-progress-v3-speed-probe.stepkobetsu.workers.dev/ || true)
+            if [ "$code" = "200" ]; then break; fi
+            echo "speed probe not ready: HTTP $code attempt $attempt"
+            sleep 3
+          done
+          if [ "$code" != "200" ]; then cat /tmp/probe-session.json || true; exit 1; fi
           SESSION_TOKEN="$(node -p "require('/tmp/probe-session.json').token")"
           echo "::add-mask::$SESSION_TOKEN"
           printf '{"action":"getStudentDashboard","token":"%s"}' "$SESSION_TOKEN" > /tmp/dashboard-request.json
