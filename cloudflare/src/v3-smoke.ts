@@ -75,6 +75,16 @@ const inspect = async (env: SmokeEnv, body: Row) => {
   return json({ ok: true, progress: progress.results[0] || null, target: target.results[0] || null, homework: homework.results[0] || null });
 };
 
+const inspectRecent1320 = async (env: SmokeEnv) => {
+  const [overrides, snapshot] = await env.DB.batch([
+    env.DB.prepare(`SELECT homework_id,student_status,student_completed_date,teacher_status,updated_at,updated_by
+      FROM v3_homework_overrides WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 40`),
+    env.DB.prepare(`SELECT homework_id,status,assigned_date,due_date,updated_at
+      FROM v3_homework_snapshot WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 20`),
+  ]);
+  return json({ ok: true, overrides: overrides.results, snapshot: snapshot.results });
+};
+
 const publicStatus = async (env: SmokeEnv) => {
   const [meta, targetOverrides, homeworkOverrides, archives, sessions] = await env.DB.batch([
     env.DB.prepare(`SELECT value FROM v3_meta WHERE key='final_snapshot_at'`),
@@ -143,6 +153,7 @@ export default {
     const action = text(value.action);
     if (action === "prepare") return prepare(env);
     if (action === "inspect") return inspect(env, value);
+    if (action === "inspectRecent1320") return inspectRecent1320(env);
     if (action === "finalize") return finalize(env);
     return json({ error: "NOT_FOUND" }, 404);
   },
