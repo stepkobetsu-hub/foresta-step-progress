@@ -9,7 +9,7 @@ const key=(subject:unknown,series:unknown,unitId:unknown)=>`${text(subject)}|${t
 export default {async fetch(req:Request,env:AuditEnv){
   if(!authorized(req,env))return json({error:'NOT_FOUND'},404);
   const students=await env.DB.prepare(`SELECT student_id,display_name,grade,status FROM students WHERE display_name LIKE '田中%' ORDER BY student_id`).all<Row>();
-  const output=[] as Row[];
+  const output:Row[]=[];
   for(const student of students.results){
     const sid=text(student.student_id);
     const [targetsRes,overridesRes,progressRes]=await env.DB.batch([
@@ -17,7 +17,7 @@ export default {async fetch(req:Request,env:AuditEnv){
       env.DB.prepare(`SELECT series,subject,unit_id,included FROM v3_target_overrides WHERE student_id=? ORDER BY subject,series,unit_id`).bind(sid),
       env.DB.prepare(`SELECT p.subject,p.unit_id,p.round,p.try_completed,p.lct_result,p.learning_date,COALESCE(m.series,'FORESTA_STEP') AS series FROM v3_progress_records p LEFT JOIN units u ON u.unit_id=p.unit_id LEFT JOIN materials m ON m.material_id=u.material_id WHERE p.student_id=? ORDER BY p.subject,p.unit_id,p.round`).bind(sid),
     ]);
-    const targets=(targetsRes.results as Row[]).map(r=>({...r,included:truthy(r.base_included)}));
+    const targets:Row[]=(targetsRes.results as Row[]).map(r=>({...r,included:truthy(r.base_included)}));
     const overrides=overridesRes.results as Row[];
     for(const o of overrides){
       const matches=targets.filter(t=>text(t.unit_id)===text(o.unit_id)&&text(t.subject)===text(o.subject));
