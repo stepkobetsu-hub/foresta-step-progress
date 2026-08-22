@@ -77,8 +77,18 @@ jobs:
           node - <<'NODE'
           const fs=require('fs');
           const x=JSON.parse(fs.readFileSync('/tmp/finalize.json','utf8'));
-          if(x.ok!==true || !(x.studentCount>0) || !(x.progressCount>0) || !(x.targetCount>0) || !(x.homeworkCount>0)) process.exit(1);
+          if(x.ok!==true || !(x.studentCount>0) || !(x.progressCount>0) || !(x.targetCount>0) || !(x.homeworkCount>0) || !x.finalSnapshotAt) process.exit(1);
           console.log('V3 final snapshot:',x);
+          NODE
+
+      - name: Verify test state is cleared
+        run: |
+          curl --fail --silent --show-error https://step-progress-v3-smoke.stepkobetsu.workers.dev/status | tee /tmp/v3-status.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/v3-status.json','utf8'));
+          if(x.ok!==true || !x.finalSnapshotAt || x.targetOverrideCount!==0 || x.homeworkOverrideCount!==0 || x.archiveOverrideCount!==0 || x.sessionCount!==0) process.exit(1);
+          console.log('V3 clean status:',x);
           NODE
 
       - name: Verify V3 health after refresh
