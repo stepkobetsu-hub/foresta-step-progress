@@ -1,21 +1,25 @@
-name: Fix V3 HTML prefix only
+name: Recover V3 production UI
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: step-progress-v3-html-fix
+  group: step-progress-v3-ui-recovery
   cancel-in-progress: false
 
 jobs:
   repair:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-v3-ui-recovery'
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
     steps:
       - name: Check out V3 implementation
         uses: actions/checkout@v4
@@ -31,32 +35,68 @@ jobs:
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
 
-      - name: Sanitize HTML and prepare V3 runtime
+      - name: Recover known-good production UI
         working-directory: cloudflare
-        run: |
-          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
-          node scripts/apply-v3-autosave.mjs public/index.html
-          npm run check
-          head -n 2 public/index.html
-          ! grep -q 'Warning: truncated output' public/index.html
-
-      - name: Deploy repaired HTML to production
-        working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Remove accidental truncation warning from V3 HTML"
-
-      - name: Verify production page and health
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 10); do
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o /tmp/known-good-index.html
+          test "$(wc -c < /tmp/known-good-index.html)" -gt 50000
+          head -n 1 /tmp/known-good-index.html | grep -qi '<!doctype html>'
+          grep -q '<title>ステップ＆ゴール進捗管理</title>' /tmp/known-good-index.html
+          grep -q '</html>' /tmp/known-good-index.html
+          ! grep -q 'Warning: truncated output' /tmp/known-good-index.html
+          ! grep -q 'Total output lines:' /tmp/known-good-index.html
+          cp /tmp/known-good-index.html public/index.html
+
+      - name: Apply V3 autosave and blank-screen fallback
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('public/index.html')
+          s=p.read_text(encoding='utf-8')
+          needle="if (hasCommonSession || hasStoredSession || hasRememberedStaff) document.documentElement.classList.add('auth-resume-pending');"
+          replacement=needle+"\n      setTimeout(() => document.documentElement.classList.remove('auth-resume-pending'), 2500);"
+          if needle not in s:
+              raise SystemExit('auth resume insertion point not found')
+          s=s.replace(needle,replacement,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+          npm run check
+          test "$(wc -c < public/index.html)" -gt 50000
+          head -n 1 public/index.html | grep -qi '<!doctype html>'
+          grep -q '</html>' public/index.html
+          grep -q '2500' public/index.html
+          ! grep -q 'Warning: truncated output' public/index.html
+
+      - name: Deploy recovered UI with V3 backend
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Recover complete production UI on V3 D1 backend"
+
+      - name: Verify production page and V3 health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
             curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
-            if head -n 1 /tmp/index.html | grep -qi '<!doctype html>' && ! grep -q 'Warning: truncated output' /tmp/index.html; then
+            if test "$(wc -c < /tmp/index.html)" -gt 50000 \
+              && head -n 1 /tmp/index.html | grep -qi '<!doctype html>' \
+              && grep -q '<title>ステップ＆ゴール進捗管理</title>' /tmp/index.html \
+              && grep -q '</html>' /tmp/index.html \
+              && ! grep -q 'Warning: truncated output' /tmp/index.html; then
               curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
               node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
+              echo "Production UI recovered: $(wc -c < /tmp/index.html) bytes"
               exit 0
             fi
             sleep 2
           done
-          echo 'Production HTML repair did not propagate'
+          echo 'Production UI recovery did not propagate'
+          wc -c /tmp/index.html || true
           head -n 5 /tmp/index.html || true
           exit 1
