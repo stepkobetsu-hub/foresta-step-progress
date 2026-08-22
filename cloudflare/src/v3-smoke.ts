@@ -25,15 +25,32 @@ const prepare = async (env: SmokeEnv) => {
     .bind(await tokenHash(sessionToken), JSON.stringify({ studentId: "1320", id: "1320", name: "V3 smoke 1320" }), expiresAt).run();
 
   const [progress, target, homework] = await env.DB.batch([
-    env.DB.prepare(`SELECT unit_id,round,lct_result,point_confirmed,warmup_confirmed,try_completed,learning_date
-      FROM v3_progress_records WHERE student_id='1320'
-      ORDER BY CASE WHEN learning_date IS NULL OR learning_date='' THEN 1 ELSE 0 END, updated_at DESC LIMIT 1`),
-    env.DB.prepare(`SELECT t.target_start AS unit_id,t.subject,COALESCE(m.series,'FORESTA_STEP') AS series,t.included
+    env.DB.prepare(`SELECT p.unit_id,p.round,p.lct_result,p.point_confirmed,p.warmup_confirmed,p.try_completed,p.learning_date
+      FROM v3_progress_records p
+      JOIN units u ON u.unit_id=p.unit_id
+      JOIN materials m ON m.material_id=u.material_id
+      JOIN students s ON s.student_id=p.student_id
+      WHERE p.student_id='1320' AND m.active=1
+        AND (u.grade='' OR u.grade=s.grade OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=s.grade OR m.grade='中1～中3共通')
+      ORDER BY CASE WHEN p.learning_date IS NULL OR p.learning_date='' THEN 1 ELSE 0 END, p.updated_at DESC LIMIT 1`),
+    env.DB.prepare(`SELECT t.target_start AS unit_id,t.subject,COALESCE(m.series,'FORESTA_STEP') AS series,
+        COALESCE(o.included,t.included) AS included
       FROM v3_target_snapshot t
-      LEFT JOIN units u ON u.unit_id=t.target_start
-      LEFT JOIN materials m ON m.material_id=u.material_id
-      WHERE t.student_id='1320' AND t.target_start IS NOT NULL AND t.target_start<>'' LIMIT 1`),
-    env.DB.prepare(`SELECT homework_id FROM v3_homework_snapshot WHERE student_id='1320' ORDER BY updated_at DESC LIMIT 1`),
+      JOIN students s ON s.student_id=t.student_id
+      JOIN units u ON u.unit_id=t.target_start AND u.subject=t.subject
+      JOIN materials m ON m.material_id=u.material_id AND m.active=1
+      LEFT JOIN v3_target_overrides o
+        ON o.student_id=t.student_id AND o.unit_id=t.target_start AND o.subject=t.subject AND o.series=COALESCE(m.series,'FORESTA_STEP')
+      WHERE t.student_id='1320' AND t.target_start IS NOT NULL AND t.target_start<>''
+        AND (u.grade='' OR u.grade=s.grade OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=s.grade OR m.grade='中1～中3共通')
+      ORDER BY COALESCE(o.included,t.included) DESC,u.unit_order,t.target_id LIMIT 1`),
+    env.DB.prepare(`SELECT h.homework_id FROM v3_homework_snapshot h
+      JOIN units u ON u.unit_id=h.unit_id
+      JOIN materials m ON m.material_id=u.material_id
+      JOIN students s ON s.student_id=h.student_id
+      WHERE h.student_id='1320' AND m.active=1
+        AND (u.grade='' OR u.grade=s.grade OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=s.grade OR m.grade='中1～中3共通')
+      ORDER BY h.updated_at DESC LIMIT 1`),
   ]);
 
   const progressRow = progress.results[0] as Row | undefined;
