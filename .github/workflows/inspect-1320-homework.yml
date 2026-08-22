@@ -1,8 +1,6 @@
 name: Inspect 1320 homework persistence
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +8,6 @@ permissions:
 
 jobs:
   inspect:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-inspect-1320-homework'
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -49,13 +46,4 @@ jobs:
             echo "Inspector not ready yet: HTTP $code attempt $attempt"
             sleep 3
           done
-          node - <<'NODE'
-          const fs=require('fs');
-          const raw=fs.readFileSync('/tmp/inspect.json','utf8');
-          const d=JSON.parse(raw);
-          if(d.ok!==true) throw new Error(raw);
-          console.log('RECENT_OVERRIDES');
-          for (const r of d.overrides||[]) console.log(JSON.stringify(r));
-          console.log('RECENT_SNAPSHOT');
-          for (const r of d.snapshot||[]) console.log(JSON.stringify(r));
-          NODE
+          cat /tmp/inspect.json
