@@ -1,0 +1,65 @@
+name: Fix V3 HTML prefix only
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step-progress-v3-html-fix
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-v3-html-fix'
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check out V3 implementation
+        uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Sanitize HTML and prepare V3 runtime
+        working-directory: cloudflare
+        run: |
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          npm run check
+          head -n 2 public/index.html
+          ! grep -q 'Warning: truncated output' public/index.html
+
+      - name: Deploy repaired HTML to production
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Remove accidental truncation warning from V3 HTML"
+
+      - name: Verify production page and health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
+            if head -n 1 /tmp/index.html | grep -qi '<!doctype html>' && ! grep -q 'Warning: truncated output' /tmp/index.html; then
+              curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
+              node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Production HTML repair did not propagate'
+          head -n 5 /tmp/index.html || true
+          exit 1
