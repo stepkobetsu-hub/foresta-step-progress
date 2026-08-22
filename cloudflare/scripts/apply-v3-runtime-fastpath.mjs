@@ -97,5 +97,45 @@ const homeworkReturnReplacement = `  }
 const overlayHomework=`;
 src = src.replace(homeworkReturnNeedle, homeworkReturnReplacement);
 
+// D1 must win regardless of whether Google returns homework at the top level,
+// inside data, or nested more deeply. Recursively patch every object carrying
+// a homeworkId/homework_id so a saved D1 state cannot be hidden by stale
+// Google structure/status fields.
+const overlayNeedle = `const overlayHomework=(value:Row,overrides:Row[])=>{
+  const byId=new Map(overrides.map((row)=>[text(row.homework_id),row]));
+  const patch=(item:unknown)=>{if(!isRow(item))return item;const o=byId.get(text(item.homeworkId));if(!o)return item;const out:Row={...item};if(o.student_status!=null)out.studentStatus=text(o.student_status);if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);if(o.teacher_status!=null)out.teacherStatus=text(o.teacher_status);if(o.confirmation_memo!=null)out.confirmationMemo=text(o.confirmation_memo);return out;};
+  const out:Row={...value};if(Array.isArray(value.homework))out.homework=value.homework.map(patch);if(Array.isArray(value.groups))out.groups=value.groups.map((group)=>isRow(group)?{...group,items:Array.isArray(group.items)?group.items.map(patch):group.items}:group);return out;
+};`;
+if (!src.includes(overlayNeedle)) throw new Error('Homework overlay point not found');
+const overlayReplacement = `const overlayHomework=(value:Row,overrides:Row[])=>{
+  const byId=new Map(overrides.map((row)=>[text(row.homework_id),row]));
+  const visit=(node:unknown):unknown=>{
+    if(Array.isArray(node))return node.map(visit);
+    if(!isRow(node))return node;
+    const out:Row={};
+    for(const [key,child] of Object.entries(node))out[key]=visit(child);
+    const id=text(out.homeworkId||out.homework_id);
+    const o=id?byId.get(id):undefined;
+    if(o){
+      if(o.student_status!=null)out.studentStatus=text(o.student_status);
+      if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);
+      if(o.teacher_status!=null)out.teacherStatus=text(o.teacher_status);
+      if(o.confirmation_memo!=null)out.confirmationMemo=text(o.confirmation_memo);
+    }
+    return out;
+  };
+  return visit(value) as Row;
+};`;
+src = src.replace(overlayNeedle, overlayReplacement);
+
+const listReturnNeedle = `  const patched=overlayHomework(value,overrideResult.results.filter(isRow));patched.archivedGroupKeys=archiveResult.results.filter(isRow).map((row)=>text(row.group_key));patched.source="GOOGLE_STRUCTURE_D1_V3_STATE";return json(patched,upstream.status,{"x-data-source":"google-structure+d1-v3-state"});`;
+if (!src.includes(listReturnNeedle)) throw new Error('Homework list return point not found');
+const listReturnReplacement = `  const patched=overlayHomework(value,overrideResult.results.filter(isRow));
+  const archivedGroupKeys=archiveResult.results.filter(isRow).map((row)=>text(row.group_key));
+  patched.archivedGroupKeys=archivedGroupKeys;patched.source="GOOGLE_STRUCTURE_D1_V3_STATE";
+  if(isRow(patched.data)){patched.data={...patched.data,archivedGroupKeys,source:"GOOGLE_STRUCTURE_D1_V3_STATE"};}
+  return json(patched,upstream.status,{"x-data-source":"google-structure+d1-v3-state"});`;
+src = src.replace(listReturnNeedle, listReturnReplacement);
+
 fs.writeFileSync(file, src);
-console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity; enabled dynamic student homework IDs; verified homework writes`);
+console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity; enabled dynamic student homework IDs; verified homework writes; recursive D1 homework overlay`);
