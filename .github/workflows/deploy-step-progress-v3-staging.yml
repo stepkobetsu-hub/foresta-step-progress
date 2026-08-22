@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/deploy-step-progress-v3-staging.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
