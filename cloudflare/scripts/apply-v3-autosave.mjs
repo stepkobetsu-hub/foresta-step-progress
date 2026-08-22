@@ -14,12 +14,37 @@ html = html
 // Homework changes every time the student checks an item. Never restore a
 // homework list from localStorage after reload; only dashboard data is cached.
 const loadHomeworkNeedle = 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null';
-if (!html.includes(loadHomeworkNeedle)) throw new Error('student homework cache load point not found');
+if (!html.includes(loadHomeworkNeedle) && !html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCache=null')) {
+  throw new Error('student homework cache load point not found');
+}
 html = html.replace(loadHomeworkNeedle, 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=null');
 
 const saveHomeworkNeedle = 'dashboard:state.dashboardCache,homework:state.homeworkCache';
-if (!html.includes(saveHomeworkNeedle)) throw new Error('student homework cache save point not found');
+if (!html.includes(saveHomeworkNeedle) && !html.includes('dashboard:state.dashboardCache,homework:null')) {
+  throw new Error('student homework cache save point not found');
+}
 html = html.replace(saveHomeworkNeedle, 'dashboard:state.dashboardCache,homework:null');
+
+// Start the D1 dashboard request immediately. The homework screen can keep its
+// current fast path, but the progress graph no longer waits for that path to
+// finish before the dashboard request begins.
+const landingNeedle = 'let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;';
+const eagerNeedle = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard'):null;";
+if (html.includes(landingNeedle) && !html.includes(eagerNeedle)) {
+  html = html.replace(landingNeedle, `${landingNeedle}\n    ${eagerNeedle}`);
+}
+if (!html.includes(eagerNeedle)) throw new Error('eager dashboard request patch missing');
+
+const earlyBackgroundNeedle = "if(needsDashboard)scheduleBackground_(()=>loadDashboardInBackground_(),0);";
+const earlyBackgroundPatch = "if(eagerDashboardPromise)eagerDashboardPromise.then(out=>{state.dashboardCache=out.data;saveStudentViewCache_();return renderStudent()}).catch(error=>console.error('[dashboard-load-failed] '+String(error?.message||error)));";
+html = html.replaceAll(earlyBackgroundNeedle, earlyBackgroundPatch);
+
+const settledNeedle = "needsDashboard?call('getStudentDashboard'):Promise.resolve(null)";
+if (html.includes(settledNeedle)) html = html.replace(settledNeedle, 'eagerDashboardPromise||Promise.resolve(null)');
+
+if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard early-render patch missing');
+if (html.includes(earlyBackgroundNeedle)) throw new Error('old delayed dashboard scheduling still present in student landing path');
+if (html.includes(settledNeedle)) throw new Error('duplicate dashboard request path still present');
 
 // Clear any old persisted view cache after a homework declaration. Older UI
 // revisions vary slightly here, so use a tolerant replacement and do not make
@@ -41,4 +66,4 @@ if (!html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCa
 if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Error('homework is still persisted in student view cache');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; autosave progress=300ms target=350ms; stale homework cache disabled');
+console.log('Sanitized V3 HTML; dashboard graph request starts immediately; autosave progress=300ms target=350ms');
