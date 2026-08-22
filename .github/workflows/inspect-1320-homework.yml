@@ -43,7 +43,6 @@ jobs:
               -d '{"action":"inspectRecent1320"}' \
               https://step-progress-v3-smoke.stepkobetsu.workers.dev || true)
             if [ "$code" = "200" ]; then break; fi
-            echo "Inspector not ready yet: HTTP $code attempt $attempt"
             sleep 3
           done
           cat /tmp/inspect.json
