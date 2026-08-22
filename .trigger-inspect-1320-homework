@@ -1,1 +1,1 @@
-Inspect recent D1 homework persistence rows for dummy student 1320. Retry via Worker binding.
+Inspect recent D1 homework persistence rows for dummy student 1320. Retry via Worker binding with propagation wait.
