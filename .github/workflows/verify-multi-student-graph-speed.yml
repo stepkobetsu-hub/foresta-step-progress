@@ -7,7 +7,7 @@ on:
       - '.verify-multi-student-graph-speed'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify:
@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: codex/homework-status-root-cause
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -62,15 +64,34 @@ jobs:
             sleep 3
           done
           [ "$code" = "200" ] || exit 1
+          : > /tmp/multi-student-speed-result.txt
           for student in 1100 1097 1214 1276 1312; do
             curl --fail --silent --show-error -H "Authorization: Bearer $PROBE_TOKEN" "https://step-progress-v3-multi-speed-probe.stepkobetsu.workers.dev/?studentId=$student" -o "/tmp/session-$student.json"
             SESSION_TOKEN="$(node -p "require('/tmp/session-$student.json').token")"
             echo "::add-mask::$SESSION_TOKEN"
             printf '{"action":"getStudentDashboard","token":"%s"}' "$SESSION_TOKEN" > "/tmp/request-$student.json"
-            echo "--- student $student ---"
-            curl --silent --show-error --output "/tmp/dashboard-$student.json" \
-              --write-out 'http=%{http_code} total=%{time_total}s starttransfer=%{time_starttransfer}s size=%{size_download}B\n' \
+            timing=$(curl --silent --show-error --output "/tmp/dashboard-$student.json" \
+              --write-out '%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}' \
               -H 'Content-Type: text/plain;charset=utf-8' --data-binary @"/tmp/request-$student.json" \
-              https://step-progress-api.stepkobetsu.workers.dev/api
-            node -e "const d=require('/tmp/dashboard-$student.json'); console.log({student:'$student',success:d.success,overall:d.data?.overall,units:d.data?.units?.length,selectable:d.data?.selectableUnits?.length})"
+              https://step-progress-api.stepkobetsu.workers.dev/api)
+            node - <<NODE >> /tmp/multi-student-speed-result.txt
+          const d=require('/tmp/dashboard-$student.json');
+          const [http,total,start,size]='$timing'.split('|');
+          console.log(JSON.stringify({studentId:'$student',http:Number(http),totalSeconds:Number(total),startTransferSeconds:Number(start),bytes:Number(size),success:d.success,targetCount:d.data?.overall?.targetCount,completedCount:d.data?.overall?.completedCount,units:d.data?.units?.length,selectableUnits:d.data?.selectableUnits?.length}));
+          NODE
           done
+          cat /tmp/multi-student-speed-result.txt
+      - name: Save result to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/multi-student-speed-result.txt /tmp/result-copy.txt
+          git switch main
+          git pull --ff-only origin main
+          mkdir -p docs
+          cp /tmp/result-copy.txt docs/multi-student-speed-result.txt
+          git config user.name 'stepkobetsu-hub'
+          git config user.email 'stepkobetsu@gmail.com'
+          git add docs/multi-student-speed-result.txt
+          git commit -m 'Record multi-student graph speed check' || exit 0
+          git push origin main
