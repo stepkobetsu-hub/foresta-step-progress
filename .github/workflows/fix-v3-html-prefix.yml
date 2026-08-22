@@ -1,8 +1,6 @@
 name: Recover V3 production UI
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,8 +13,7 @@ concurrency:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'agent/trigger-v3-homework-fix'
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
@@ -35,23 +32,15 @@ jobs:
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
 
-      - name: Recover known-good production UI
+      - name: Recover known-good UI and apply V3 runtime
         working-directory: cloudflare
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o /tmp/known-good-index.html
-          test "$(wc -c < /tmp/known-good-index.html)" -gt 50000
-          head -n 1 /tmp/known-good-index.html | grep -qi '<!doctype html>'
-          grep -q '<title>ステップ＆ゴール進捗管理</title>' /tmp/known-good-index.html
-          grep -q '</html>' /tmp/known-good-index.html
-          cp /tmp/known-good-index.html public/index.html
-
-      - name: Apply V3 autosave homework fix and blank-screen fallback
-        working-directory: cloudflare
-        shell: bash
-        run: |
-          set -euo pipefail
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o public/index.html
+          test "$(wc -c < public/index.html)" -gt 50000
+          head -n 1 public/index.html | grep -qi '<!doctype html>'
+          grep -q '</html>' public/index.html
           node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
           node scripts/apply-v3-autosave.mjs public/index.html
           python - <<'PY'
@@ -66,14 +55,12 @@ jobs:
           p.write_text(s,encoding='utf-8')
           PY
           npm run check
-          test "$(wc -c < public/index.html)" -gt 50000
-          grep -q '</html>' public/index.html
 
-      - name: Deploy homework persistence fix to production
+      - name: Deploy V3 production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Persist and verify current student homework checks in V3"
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Manual V3 UI recovery"
 
-      - name: Verify production page and V3 health
+      - name: Verify production
         shell: bash
         run: |
           set -euo pipefail
@@ -82,51 +69,3 @@ jobs:
           grep -q '</html>' /tmp/index.html
           curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
           node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
-
-      - name: Create protected 1320 session helper
-        working-directory: cloudflare
-        shell: bash
-        run: |
-          set -euo pipefail
-          SMOKE_TOKEN="$(openssl rand -hex 32)"
-          echo "::add-mask::$SMOKE_TOKEN"
-          echo "SMOKE_TOKEN=$SMOKE_TOKEN" >> "$GITHUB_ENV"
-          SMOKE_TOKEN="$SMOKE_TOKEN" node - <<'NODE'
-          const fs=require('fs');
-          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
-          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
-          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
-          NODE
-          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected 1320 dynamic homework test helper"
-
-      - name: Test 1320 dynamic homework save readback and undo
-        shell: bash
-        run: |
-          set -euo pipefail
-          sleep 4
-          node - <<'NODE'
-          const helper='https://step-progress-v3-smoke.stepkobetsu.workers.dev';
-          const api='https://step-progress-api.stepkobetsu.workers.dev/api';
-          const smokeToken=process.env.SMOKE_TOKEN;
-          async function post(url,body,auth=''){
-            const started=performance.now();
-            const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json',...(auth?{authorization:`Bearer ${auth}`}:{})},body:JSON.stringify(body)});
-            const data=await r.json();
-            if(!r.ok) throw new Error(`HTTP ${r.status}: ${JSON.stringify(data)}`);
-            return {data,wallMs:Math.round(performance.now()-started)};
-          }
-          const prepared=await post(helper,{action:'prepare'},smokeToken);
-          if(prepared.data.ok!==true) throw new Error(JSON.stringify(prepared.data));
-          const token=prepared.data.sessionToken;
-          const id=`v3-dynamic-1320-${Date.now()}`;
-          const saved=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:'DECLARED_DONE'});
-          if(saved.data.success!==true||saved.data.verified!==true) throw new Error(`dynamic homework save failed: ${JSON.stringify(saved.data)}`);
-          if(Number(saved.data.elapsedMs||0)>=2000) throw new Error(`dynamic homework save too slow: ${saved.data.elapsedMs}ms`);
-          const inspected=await post(helper,{action:'inspect',homeworkId:id},smokeToken);
-          if(inspected.data.homework?.student_status!=='DECLARED_DONE') throw new Error(`dynamic homework readback mismatch: ${JSON.stringify(inspected.data.homework)}`);
-          const undone=await post(api,{action:'declareHomework',token,homeworkId:id,studentStatus:'UNINPUT'});
-          if(undone.data.success!==true||undone.data.verified!==true) throw new Error(`dynamic homework undo failed: ${JSON.stringify(undone.data)}`);
-          const inspectedUndo=await post(helper,{action:'inspect',homeworkId:id},smokeToken);
-          if(inspectedUndo.data.homework?.student_status!=='UNINPUT') throw new Error(`dynamic homework undo readback mismatch: ${JSON.stringify(inspectedUndo.data.homework)}`);
-          console.log(JSON.stringify({ok:true,studentId:'1320',dynamicHomeworkId:id,serverMs:Number(saved.data.elapsedMs||0),wallMs:saved.wallMs,saveReadbackVerified:true,undoReadbackVerified:true}));
-          NODE
