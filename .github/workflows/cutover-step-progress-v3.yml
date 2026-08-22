@@ -1,0 +1,114 @@
+name: Cut over step-progress to V3
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step-progress-v3-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check out V3 implementation
+        uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Prepare V3 runtime and UI
+        working-directory: cloudflare
+        run: |
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          npm run check
+
+      - name: Record rollback deployment
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== CURRENT PRODUCTION DEPLOYMENT (ROLLBACK) ==='
+          npx wrangler deployments list --name step-progress-api --json | tee /tmp/pre-v3-deployments.json
+          echo '=== CURRENT PRODUCTION VERSIONS ==='
+          npx wrangler versions list --name step-progress-api --json | tee /tmp/pre-v3-versions.json
+
+      - name: Create protected final-snapshot helper config
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$SMOKE_TOKEN"
+          echo "SMOKE_TOKEN=$SMOKE_TOKEN" >> "$GITHUB_ENV"
+          SMOKE_TOKEN="$SMOKE_TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+
+      - name: Deploy protected final-snapshot helper
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "V3 final snapshot helper"
+
+      - name: Final snapshot from current production data
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 4
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $SMOKE_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"finalize"}' \
+            https://step-progress-v3-smoke.stepkobetsu.workers.dev/ \
+            | tee /tmp/v3-finalize.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const v=JSON.parse(fs.readFileSync('/tmp/v3-finalize.json','utf8'));
+          if(v.ok!==true || !(v.studentCount>0) || !(v.progressCount>0) || !(v.targetCount>0)) process.exit(1);
+          console.log('Final V3 snapshot:',v);
+          NODE
+
+      - name: Deploy V3 to production URL
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "V3 D1-first autosave production cutover"
+
+      - name: Verify V3 production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --show-error -H 'Cache-Control: no-cache' \
+              https://step-progress-api.stepkobetsu.workers.dev/health > /tmp/v3-prod-health.json; then
+              if node -e 'const h=require("/tmp/v3-prod-health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'; then
+                cat /tmp/v3-prod-health.json
+                exit 0
+              fi
+            fi
+            sleep 3
+          done
+          echo 'V3 production health did not become ready'
+          cat /tmp/v3-prod-health.json 2>/dev/null || true
+          exit 1
+
+      - name: Record new production deployment
+        working-directory: cloudflare
+        run: npx wrangler deployments list --name step-progress-api --json
