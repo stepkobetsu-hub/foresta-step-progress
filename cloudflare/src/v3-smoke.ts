@@ -75,6 +75,41 @@ const inspect = async (env: SmokeEnv, body: Row) => {
   return json({ ok: true, progress: progress.results[0] || null, target: target.results[0] || null, homework: homework.results[0] || null });
 };
 
+const finalize = async (env: SmokeEnv) => {
+  const started = performance.now();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM v3_progress_records`),
+    env.DB.prepare(`INSERT INTO v3_progress_records(record_id,student_id,material_id,subject,grade,unit_id,round,point_confirmed,warmup_confirmed,try_completed,memorization_completed,exercise_completed,lct_result,learning_date,updated_at,updated_by,version,request_id)
+      SELECT record_id,student_id,material_id,subject,grade,unit_id,round,point_confirmed,warmup_confirmed,try_completed,memorization_completed,exercise_completed,lct_result,learning_date,updated_at,updated_by,version,request_id FROM progress_records`),
+    env.DB.prepare(`DELETE FROM v3_target_snapshot`),
+    env.DB.prepare(`INSERT INTO v3_target_snapshot(target_id,student_id,material_id,subject,target_start,target_end,target_period,included,updated_at,updated_by,version)
+      SELECT target_id,student_id,material_id,subject,target_start,target_end,target_period,included,updated_at,updated_by,version FROM student_targets`),
+    env.DB.prepare(`DELETE FROM v3_homework_snapshot`),
+    env.DB.prepare(`INSERT INTO v3_homework_snapshot(homework_id,student_id,material_id,subject,unit_id,assigned_date,due_date,completed_date,correction_date,review_date,archived_at,restored_at,status,updated_at,updated_by,version,request_id)
+      SELECT homework_id,student_id,material_id,subject,unit_id,assigned_date,due_date,completed_date,correction_date,review_date,archived_at,restored_at,status,updated_at,updated_by,version,request_id FROM homework_records`),
+    env.DB.prepare(`DELETE FROM v3_target_overrides`),
+    env.DB.prepare(`DELETE FROM v3_homework_overrides`),
+    env.DB.prepare(`DELETE FROM v3_homework_group_archives`),
+    env.DB.prepare(`DELETE FROM v3_sessions`),
+    env.DB.prepare(`INSERT INTO v3_meta(key,value,updated_at) VALUES('bootstrap_complete','1',datetime('now')) ON CONFLICT(key) DO UPDATE SET value='1',updated_at=datetime('now')`),
+  ]);
+  const [students, progress, targets, homework] = await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM students`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_progress_records`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_target_snapshot`),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM v3_homework_snapshot`),
+  ]);
+  const count = (result: D1Result<unknown>) => Number((result.results[0] as Row | undefined)?.count || 0);
+  return json({
+    ok: true,
+    studentCount: count(students),
+    progressCount: count(progress),
+    targetCount: count(targets),
+    homeworkCount: count(homework),
+    elapsedMs: Math.round(performance.now() - started),
+  });
+};
+
 export default {
   async fetch(request: Request, env: SmokeEnv): Promise<Response> {
     if (!authorized(request, env)) return json({ error: "NOT_FOUND" }, 404);
@@ -84,6 +119,7 @@ export default {
     const action = text(value.action);
     if (action === "prepare") return prepare(env);
     if (action === "inspect") return inspect(env, value);
+    if (action === "finalize") return finalize(env);
     return json({ error: "NOT_FOUND" }, 404);
   },
 } satisfies ExportedHandler<SmokeEnv>;
