@@ -1,0 +1,71 @@
+name: Audit Tanaka progress denominator
+
+on:
+  pull_request:
+    branches:
+      - agent/step-progress-v3-implementation
+    paths:
+      - .tanaka-progress-trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'codex/homework-status-root-cause'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/homework-status-root-cause
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: TypeScript check
+        working-directory: cloudflare
+        run: npm run check
+      - name: Deploy protected read-only audit helper
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "AUDIT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          AUDIT_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          fs.writeFileSync('wrangler.v3-progress-audit.generated.json',JSON.stringify({
+            '$schema':'node_modules/wrangler/config-schema.json',
+            name:'step-progress-v3-progress-audit',
+            main:'src/v3-progress-audit.ts',
+            compatibility_date:'2026-08-22',
+            compatibility_flags:['nodejs_compat'],
+            vars:{AUDIT_TOKEN:process.env.AUDIT_TOKEN},
+            d1_databases:[{binding:'DB',database_name:'step-progress-db',database_id:'028f097c-2609-4bf7-9e9b-39b565606941'}]
+          },null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-progress-audit.generated.json --message "Read-only Tanaka progress audit"
+      - name: Audit Tanaka progress denominator
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const url='https://step-progress-v3-progress-audit.stepkobetsu.workers.dev';
+          const token=process.env.AUDIT_TOKEN;
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          let data;
+          for(let i=0;i<10;i++){
+            const r=await fetch(url,{headers:{authorization:`Bearer ${token}`}});
+            if(r.status===404){await sleep(1500);continue;}
+            data=await r.json();if(!r.ok)throw new Error(JSON.stringify(data));break;
+          }
+          if(!data)throw new Error('audit helper not ready');
+          console.log('TANAKA_PROGRESS_AUDIT '+JSON.stringify(data));
+          NODE
