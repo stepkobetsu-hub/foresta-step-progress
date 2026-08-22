@@ -6,8 +6,6 @@ let src = fs.readFileSync(file, 'utf8');
 const bootstrapMatches = src.match(/await ensureBootstrap\(env\);/g) || [];
 if (bootstrapMatches.length < 7) throw new Error(`Expected V3 bootstrap calls, found ${bootstrapMatches.length}`);
 
-// Bootstrap is a deployment/health responsibility. Rechecking schema on every
-// user save adds several D1 round-trips and defeats the sub-2-second goal.
 src = src.replaceAll('await ensureBootstrap(env);', '');
 const healthNeedle = 'const started=performance.now();';
 if (!src.includes(healthNeedle)) throw new Error('Health bootstrap insertion point not found');
@@ -21,7 +19,6 @@ const localNeedle = 'if (!token) return null;\n  await ensureSchema(env);\n  con
 if (!src.includes(localNeedle)) throw new Error('localSession schema fast-path point not found');
 src = src.replace(localNeedle, 'if (!token) return null;\n  const hash');
 
-// Progress must carry the material series into dashboard/summary identity.
 const progressQueryNeedle = `    env.DB.prepare(\`SELECT p.record_id,p.material_id,p.subject,p.grade,p.unit_id,p.round,p.point_confirmed,p.warmup_confirmed,p.try_completed,p.memorization_completed,p.exercise_completed,p.lct_result,p.learning_date,p.updated_at,p.version,u.title AS unit_title,u.unit_order
       FROM v3_progress_records p LEFT JOIN units u ON u.unit_id=p.unit_id WHERE p.student_id=? ORDER BY p.subject,u.unit_order,p.round\`).bind(studentId),`;
 if (!src.includes(progressQueryNeedle)) throw new Error('Progress dashboard query point not found');
@@ -29,9 +26,6 @@ const progressQueryReplacement = `    env.DB.prepare(\`SELECT p.record_id,p.mate
       FROM v3_progress_records p LEFT JOIN units u ON u.unit_id=p.unit_id LEFT JOIN materials m ON m.material_id=u.material_id WHERE p.student_id=? ORDER BY p.subject,m.series,u.unit_order,p.round\`).bind(studentId),`;
 src = src.replace(progressQueryNeedle, progressQueryReplacement);
 
-// Snapshot target rows can contain duplicates/legacy series values. Apply one
-// V3 override to every matching subject+unit row and force the current series,
-// so no stale included row can make a target look restored after reload.
 const targetNeedle = `  const targets = targetResult.results.filter(isRow).map((row) => ({ ...row }));
   const targetByKey = new Map(targets.map((row) => [\`${'${text(row.series)}|${text(row.subject)}|${text(row.unit_id)}'}\`, row]));
   for (const override of overrideResult.results.filter(isRow)) {
@@ -55,11 +49,6 @@ const targetReplacement = `  const targets = targetResult.results.filter(isRow).
   const selectableResult =`;
 src = src.replace(targetNeedle, targetReplacement);
 
-// listHomework is still built from the current Google structure. A newly
-// generated homework row may therefore have an ID that was not present in the
-// cutover snapshot. For a STUDENT declareHomework request the authenticated
-// session itself is the authoritative owner, so allow that new ID to be stored
-// directly in the V3 override table instead of rejecting it as unknown.
 const homeworkOwnerNeedle = `  const byId=await homeworkStudentIds(env,ids);
   for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
 if (!src.includes(homeworkOwnerNeedle)) throw new Error('Homework owner validation point not found');
@@ -70,8 +59,6 @@ const homeworkOwnerReplacement = `  const byId=await homeworkStudentIds(env,ids)
   for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
 src = src.replace(homeworkOwnerNeedle, homeworkOwnerReplacement);
 
-// Never report a homework save as successful until D1 returns the state that
-// was just requested. This keeps an optimistic UI from silently reverting.
 const homeworkReturnNeedle = `  }
   return json({success:true,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
 };
@@ -79,7 +66,7 @@ const homeworkReturnNeedle = `  }
 const overlayHomework=`;
 if (!src.includes(homeworkReturnNeedle)) throw new Error('Homework save return point not found');
 const homeworkReturnReplacement = `  }
-  const verifyResults=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_status,teacher_status FROM v3_homework_overrides WHERE student_id=? AND homework_id=?").bind(byId.get(id),id)));
+  const verifyResults=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_status,student_completed_date,teacher_status,confirmation_memo FROM v3_homework_overrides WHERE student_id=? AND homework_id=?").bind(byId.get(id),id)));
   for(let index=0;index<ids.length;index++){
     const row=verifyResults[index].results[0] as Row|undefined;
     if(!row)return json({success:false,error:"宿題の保存確認に失敗しました。",code:"HOMEWORK_WRITE_NOT_FOUND"},500);
@@ -91,16 +78,20 @@ const homeworkReturnReplacement = `  }
       if(text(row.teacher_status)!==expected)return json({success:false,error:"宿題確認の保存内容が一致しません。",code:"HOMEWORK_WRITE_MISMATCH"},500);
     }
   }
-  return json({success:true,verified:true,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
+  const savedRow=verifyResults[0].results[0] as Row;
+  const homework={
+    homeworkId:ids[0],
+    studentStatus:text(savedRow.student_status)||"UNINPUT",
+    studentCompletedDate:text(savedRow.student_completed_date),
+    teacherStatus:text(savedRow.teacher_status),
+    confirmationMemo:text(savedRow.confirmation_memo),
+  };
+  return json({success:true,verified:true,homework,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
 };
 
 const overlayHomework=`;
 src = src.replace(homeworkReturnNeedle, homeworkReturnReplacement);
 
-// D1 must win regardless of whether Google returns homework at the top level,
-// inside data, or nested more deeply. Recursively patch every object carrying
-// a homeworkId/homework_id so a saved D1 state cannot be hidden by stale
-// Google structure/status fields.
 const overlayNeedle = `const overlayHomework=(value:Row,overrides:Row[])=>{
   const byId=new Map(overrides.map((row)=>[text(row.homework_id),row]));
   const patch=(item:unknown)=>{if(!isRow(item))return item;const o=byId.get(text(item.homeworkId));if(!o)return item;const out:Row={...item};if(o.student_status!=null)out.studentStatus=text(o.student_status);if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);if(o.teacher_status!=null)out.teacherStatus=text(o.teacher_status);if(o.confirmation_memo!=null)out.confirmationMemo=text(o.confirmation_memo);return out;};
@@ -138,4 +129,4 @@ const listReturnReplacement = `  const patched=overlayHomework(value,overrideRes
 src = src.replace(listReturnNeedle, listReturnReplacement);
 
 fs.writeFileSync(file, src);
-console.log(`Applied V3 runtime fast path; removed ${bootstrapMatches.length - 1} per-request bootstrap calls; aligned target/progress identity; enabled dynamic student homework IDs; verified homework writes; recursive D1 homework overlay`);
+console.log(`Applied V3 runtime fast path; homework save now returns browser-compatible homework object`);
