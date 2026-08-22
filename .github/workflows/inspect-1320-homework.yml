@@ -38,14 +38,22 @@ jobs:
           fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
           NODE
           npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected 1320 persistence inspector"
-          sleep 3
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Content-Type: application/json' \
-            -d '{"action":"inspectRecent1320"}' \
-            https://step-progress-v3-smoke.stepkobetsu.workers.dev | tee /tmp/inspect.json
+          rm -f /tmp/inspect.json
+          for attempt in $(seq 1 10); do
+            code=$(curl --silent --show-error -o /tmp/inspect.json -w '%{http_code}' \
+              -H "Authorization: Bearer $TOKEN" \
+              -H 'Content-Type: application/json' \
+              -d '{"action":"inspectRecent1320"}' \
+              https://step-progress-v3-smoke.stepkobetsu.workers.dev || true)
+            if [ "$code" = "200" ]; then break; fi
+            echo "Inspector not ready yet: HTTP $code attempt $attempt"
+            sleep 3
+          done
           node - <<'NODE'
-          const d=require('/tmp/inspect.json');
+          const fs=require('fs');
+          const raw=fs.readFileSync('/tmp/inspect.json','utf8');
+          const d=JSON.parse(raw);
+          if(d.ok!==true) throw new Error(raw);
           console.log('RECENT_OVERRIDES');
           for (const r of d.overrides||[]) console.log(JSON.stringify(r));
           console.log('RECENT_SNAPSHOT');
