@@ -1,0 +1,172 @@
+name: Cut over step-progress V3 production
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cutover-step-progress-v3-production.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: step-progress-production
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check out V3 implementation
+        uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Apply V3 runtime fast path
+        working-directory: cloudflare
+        run: node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+
+      - name: Verify TypeScript
+        working-directory: cloudflare
+        run: npm run check
+
+      - name: Apply V3 autosave debounce
+        working-directory: cloudflare
+        run: node scripts/apply-v3-autosave.mjs public/index.html
+
+      - name: Require healthy staging before cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error https://step-progress-v3-staging.stepkobetsu.workers.dev/health | tee /tmp/staging-health.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const h=JSON.parse(fs.readFileSync('/tmp/staging-health.json','utf8'));
+          if(h.ok!==true || h.mode!=='d1-isolated-autosave' || !(h.dummy1320>=1)) process.exit(1);
+          NODE
+
+      - name: Create protected final snapshot helper config
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$SMOKE_TOKEN"
+          echo "SMOKE_TOKEN=$SMOKE_TOKEN" >> "$GITHUB_ENV"
+          SMOKE_TOKEN="$SMOKE_TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+
+      - name: Deploy protected final snapshot helper
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "V3 production cutover snapshot helper"
+
+      - name: Wait for helper propagation
+        run: sleep 4
+
+      - name: Refresh V3 snapshot immediately before cutover
+        shell: bash
+        env:
+          SMOKE_TOKEN: ${{ env.SMOKE_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -X POST \
+            -H 'content-type: application/json' \
+            -H "authorization: Bearer $SMOKE_TOKEN" \
+            --data '{"action":"finalize"}' \
+            https://step-progress-v3-smoke.stepkobetsu.workers.dev \
+            | tee /tmp/finalize.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/finalize.json','utf8'));
+          if(x.ok!==true || !x.finalSnapshotAt || !(x.studentCount>0) || !(x.progressCount>0) || !(x.targetCount>0) || !(x.homeworkCount>0)) process.exit(1);
+          console.log('FINAL_SNAPSHOT',JSON.stringify(x));
+          NODE
+
+      - name: Verify no smoke state remains
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error https://step-progress-v3-smoke.stepkobetsu.workers.dev/status | tee /tmp/v3-status.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const x=JSON.parse(fs.readFileSync('/tmp/v3-status.json','utf8'));
+          if(x.ok!==true || !x.finalSnapshotAt || x.targetOverrideCount!==0 || x.homeworkOverrideCount!==0 || x.archiveOverrideCount!==0 || x.sessionCount!==0) process.exit(1);
+          console.log('CLEAN_STATUS',JSON.stringify(x));
+          NODE
+
+      - name: Record current production deployment for rollback
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -u
+          echo '--- production deployment before cutover ---'
+          npx wrangler deployments status --name step-progress-api --json | tee /tmp/deployment-before.json || true
+          echo '--- recent production versions before cutover ---'
+          npx wrangler versions list --name step-progress-api --json | tee /tmp/versions-before.json || true
+          echo '--- current production health ---'
+          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health || true
+          echo
+
+      - name: Deploy V3 to production URL
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --keep-vars --message "V3 D1-first autosave production cutover"
+
+      - name: Verify V3 production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/health > /tmp/prod-health.json; then
+              if node -e 'const fs=require("fs");const h=JSON.parse(fs.readFileSync("/tmp/prod-health.json","utf8"));process.exit(h.ok===true&&h.mode==="d1-isolated-autosave"?0:1)'; then
+                cat /tmp/prod-health.json
+                break
+              fi
+            fi
+            if [ "$attempt" = "12" ]; then
+              echo 'V3 production health did not become ready'
+              cat /tmp/prod-health.json 2>/dev/null || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Verify production UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --show-error --location -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ --output /tmp/prod-index.html
+            if grep -q 'ステップ＆ゴール進捗管理' /tmp/prod-index.html; then
+              break
+            fi
+            if [ "$attempt" = "12" ]; then exit 1; fi
+            sleep 5
+          done
+          echo "production_html_sha256=$(sha256sum /tmp/prod-index.html | cut -d' ' -f1)"
+
+      - name: Record V3 production deployment
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          echo '--- production deployment after cutover ---'
+          npx wrangler deployments status --name step-progress-api --json || true
+          echo '--- recent production versions after cutover ---'
+          npx wrangler versions list --name step-progress-api --json || true
