@@ -34,9 +34,13 @@ const progressState = (row: Row | undefined, roundNumber: number) => ({
 
 export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[], homework: Row[], selectable: Row[]) => {
   const summary = buildDashboardSummary(targets, progress, homework);
-  const targetKeys = new Set(targets
+  // unit_id is globally unique in the units table. Target inclusion therefore
+  // uses only unit_id; mixing legacy series labels into target identity caused
+  // a saved target to appear restored after reload.
+  const targetIds = new Set(targets
     .filter((row) => truthy(row.included))
-    .map((row) => unitKey(row.subject, row.series, row.unit_id)));
+    .map((row) => text(row.unit_id))
+    .filter(Boolean));
   const progressByKey = new Map(progress.map((row) => [
     `${unitKey(row.subject, row.series, row.unit_id)}:${Number(row.round) || 1}`,
     row,
@@ -64,8 +68,6 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
     };
   };
   const allUnits = selectable.map(mapUnit);
-  const keyForUnit = (unit: { subject: string; series: string; unitId: string }) =>
-    unitKey(unit.subject, unit.series, unit.unitId);
   const progressKeys = new Set(progress.map((row) => unitKey(row.subject, row.series, row.unit_id)));
   const newest = progress.map((row) => text(row.updated_at)).filter(Boolean).sort().pop() || "";
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
@@ -112,9 +114,9 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
       subjects: [],
     },
     newMilestone: null,
-    units: allUnits.filter((unit) => targetKeys.has(keyForUnit(unit))),
-    outsideTargetUnits: allUnits.filter((unit) => !targetKeys.has(keyForUnit(unit)) && progressKeys.has(keyForUnit(unit))),
-    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetKeys.has(keyForUnit(unit)) })),
+    units: allUnits.filter((unit) => targetIds.has(unit.unitId)),
+    outsideTargetUnits: allUnits.filter((unit) => !targetIds.has(unit.unitId) && progressKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),
+    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetIds.has(unit.unitId) })),
     lastStudentInputAt: newest,
     achievements: { earned: [], next: null },
   };
