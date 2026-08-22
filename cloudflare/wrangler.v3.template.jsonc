@@ -18,9 +18,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "step-progress-v3-db",
-      "database_id": "__V3_DB_ID__",
-      "migrations_dir": "migrations"
+      "database_name": "step-progress-db",
+      "database_id": "028f097c-2609-4bf7-9e9b-39b565606941"
     }
   ]
 }
