@@ -2,6 +2,11 @@ name: Recover V3 production UI
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .deploy-v3-graph-session-trigger
 
 permissions:
   contents: read
@@ -13,7 +18,7 @@ concurrency:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
@@ -28,8 +33,10 @@ jobs:
           node-version: 22
       - name: Install dependencies
         working-directory: cloudflare
-        run: npm install --ignore-scripts --no-audit --no-fund
-      - name: Prepare native homework UI and V3 runtime
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save playwright@1.55.0
+      - name: Prepare production UI and V3 runtime
         working-directory: cloudflare
         shell: bash
         run: |
@@ -40,20 +47,72 @@ jobs:
           grep -q '</html>' public/index.html
           node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
           node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-graph-session-fix.mjs public/index.html
           node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
           npm run check
-          grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' public/index.html
-          grep -q 'applyHomeworkCheckToCache_(out.homework)' public/index.html
-          grep -q 'homework,elapsedMs:elapsed(started)' src/v3.ts
+          grep -q 'renderProgressHeroFast_(out.data)' public/index.html
+          grep -q 'state.dashboardCache&&!renderProgressHeroFast_(state.dashboardCache)' public/index.html
+          grep -q 'const storedValid=!!(saved&&saved.token&&saved.profile' public/index.html
+          grep -q 'forestaProgress.manualLogout' public/index.html
+          grep -q "done?'宿題済み':'チェック'" public/index.html
       - name: Deploy V3 production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Return homework object for immediate UI persistence"
-      - name: Verify production UI and health
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Persist refresh session and immediate progress graph"
+      - name: Create protected browser test session
+        working-directory: cloudflare
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
-          grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' /tmp/index.html
-          grep -q 'applyHomeworkCheckToCache_(out.homework)' /tmp/index.html
-          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
+          SESSION_TOKEN="refresh-browser-$(openssl rand -hex 32)"
+          echo "::add-mask::$SESSION_TOKEN"
+          export SESSION_TOKEN
+          node <<'NODE'
+          const fs=require('fs'),crypto=require('crypto');
+          const token=process.env.SESSION_TOKEN;
+          const hash=crypto.createHash('sha256').update(token).digest('hex');
+          const expires=new Date(Date.now()+30*60*1000).toISOString();
+          const profile=JSON.stringify({studentId:'1100',id:'1100',name:'田中彗翔'}).replaceAll("'","''");
+          fs.writeFileSync('/tmp/browser-session.sql',`INSERT OR REPLACE INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at) VALUES('${hash}','1100','STUDENT','${profile}',datetime('${expires}'),datetime('now'),datetime('now'));\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV,`SESSION_TOKEN=${token}\nEXPIRES_AT=${expires}\n`);
+          NODE
+          npx wrangler d1 execute step-progress-db --remote --file /tmp/browser-session.sql
+      - name: Verify refresh twice in real browser
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$SESSION_TOKEN"
+          npx playwright install --with-deps chromium
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            await page.goto('https://step-progress-api.stepkobetsu.workers.dev/?verify='+Date.now(),{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{
+              const value={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};
+              sessionStorage.setItem('fsSession',JSON.stringify(value));
+              localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(value));
+              localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');
+              localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString());
+              localStorage.removeItem('forestaProgress.manualLogout');
+            },{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            for(let i=1;i<=2;i++){
+              const started=Date.now();
+              await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+              await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:8000});
+              const elapsed=Date.now()-started;
+              const body=await page.locator('body').innerText();
+              if(body.includes('生徒ログイン')&&!body.includes('田中彗翔'))throw new Error('refresh returned to login');
+              console.log(`PRODUCTION_REFRESH_${i}_MS=${elapsed}`);
+              if(elapsed>8000)throw new Error('graph render too slow');
+            }
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+      - name: Verify production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error 'https://step-progress-api.stepkobetsu.workers.dev/health' | tee /tmp/health.json
           node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
