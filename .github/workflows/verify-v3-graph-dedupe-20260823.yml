@@ -1,0 +1,66 @@
+name: Verify V3 graph dedupe 20260823
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.verify-v3-graph-dedupe-trigger']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build and deploy
+        working-directory: cloudflare
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save playwright@1.55.0
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o public/index.html
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-graph-session-fix.mjs public/index.html
+          node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
+          npm run check
+          npx wrangler deploy --config wrangler.v3.production.jsonc --message "Deduplicate fast progress graph"
+      - name: Create protected session
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROBE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$PROBE_TOKEN"
+          cat > src/refresh-session-probe.ts <<'TS'
+          type Env={DB:D1Database;PROBE_TOKEN:string};
+          const hash=async(token:string)=>{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return Array.from(new Uint8Array(d),b=>b.toString(16).padStart(2,'0')).join('')};
+          export default {async fetch(req:Request,env:Env){const supplied=(req.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');if(!env.PROBE_TOKEN||supplied!==env.PROBE_TOKEN)return new Response('not found',{status:404});const token=`dedupe-1100-${crypto.randomUUID()}`;const digest=await hash(token),expires=new Date(Date.now()+30*60*1000).toISOString();const profile={studentId:'1100',id:'1100',name:'田中彗翔'};await env.DB.prepare(`INSERT INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at) VALUES(?,?,'STUDENT',?,datetime(?),datetime('now'),datetime('now'))`).bind(digest,'1100',JSON.stringify(profile),expires).run();return new Response(JSON.stringify({token,expiresAt:expires}),{headers:{'content-type':'application/json','cache-control':'no-store'}})}} satisfies ExportedHandler<Env>;
+          TS
+          PROBE_TOKEN="$PROBE_TOKEN" node - <<'NODE'
+          const fs=require('fs');fs.writeFileSync('wrangler.refresh-session-probe.json',JSON.stringify({name:'step-progress-v3-refresh-session-probe',main:'src/refresh-session-probe.ts',compatibility_date:'2026-08-23',compatibility_flags:['nodejs_compat'],vars:{PROBE_TOKEN:process.env.PROBE_TOKEN},d1_databases:[{binding:'DB',database_name:'step-progress-db',database_id:'028f097c-2609-4bf7-9e9b-39b565606941'}]},null,2));
+          NODE
+          npx wrangler deploy --config wrangler.refresh-session-probe.json --message "Temporary protected dedupe session"
+          for i in $(seq 1 12); do code=$(curl -sS -o /tmp/session.json -w '%{http_code}' -H "Authorization: Bearer $PROBE_TOKEN" https://step-progress-v3-refresh-session-probe.stepkobetsu.workers.dev/ || true); [ "$code" = 200 ] && break; sleep 2; done
+          [ "$code" = 200 ]
+          SESSION_TOKEN="$(node -p "require('/tmp/session.json').token")"; EXPIRES_AT="$(node -p "require('/tmp/session.json').expiresAt")"
+          echo "::add-mask::$SESSION_TOKEN"; echo "SESSION_TOKEN=$SESSION_TOKEN" >> "$GITHUB_ENV"; echo "EXPIRES_AT=$EXPIRES_AT" >> "$GITHUB_ENV"
+      - name: Verify one graph and refresh persistence
+        working-directory: cloudflare
+        run: |
+          npx playwright install --with-deps chromium
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{const b=await chromium.launch({headless:true}),p=await b.newPage();await p.goto('https://step-progress-api.stepkobetsu.workers.dev/?verify='+Date.now(),{waitUntil:'domcontentloaded',timeout:30000});await p.evaluate(({token,expiresAt})=>{const v={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(v));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(v));localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString());localStorage.removeItem('forestaProgress.manualLogout')},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});for(let i=1;i<=2;i++){const s=Date.now();await p.reload({waitUntil:'domcontentloaded',timeout:30000});await p.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:8000});await p.waitForTimeout(1200);const result=await p.evaluate(()=>({count:(document.body.innerText.match(/全体進捗/g)||[]).length,login:document.body.innerText.includes('生徒ログイン'),name:document.body.innerText.includes('田中彗翔')}));console.log('CHECK_'+i,Date.now()-s,result);if(result.count!==1)throw new Error('duplicate progress graphs: '+result.count);if(result.login&&!result.name)throw new Error('refresh returned to login')}await b.close()})().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+      - name: Health
+        run: curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health
