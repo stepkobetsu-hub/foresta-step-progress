@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - '.verify-production-graph-browser-trigger'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.verify-production-graph-browser-trigger'
 
 permissions:
   contents: read
