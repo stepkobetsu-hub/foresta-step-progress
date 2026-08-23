@@ -58,6 +58,16 @@ if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard completion 
 if (html.includes(earlyBackgroundNeedle)) throw new Error('old delayed dashboard scheduling still present in student landing path');
 if (html.includes(settledNeedle)) throw new Error('duplicate dashboard request path still present');
 
+// On refresh, prefer the app's own still-valid stored session. Older UI chose
+// the shared/common token first; when that token was stale it could throw the
+// user back to the login screen even though fsSession/rememberedSession was
+// still valid. Only consult the common token when there is no valid app session.
+const resumePattern = /let saved=null;\s*const common=readCommonSession_\(\);\s*try\{\s*if\(common\)\{\s*const verified=await rpc\(\{action:'getCommonStudentSession',token:common\.token\},\{attempts:1,timeoutMs:30000\}\);\s*if\(!verified\.success\|\|verified\.role!=='STUDENT'\|\|!verified\.profile\)throw new Error\('COMMON_SESSION_INVALID'\);\s*saved=\{token:common\.token,role:'STUDENT',profile:verified\.profile,expiresAt:common\.expiresAt\};\s*clearStoredSession_\(\);\s*saveStoredSession_\(saved,false\);\s*\}else saved=readStoredSession_\(\);/;
+const resumePatch = `let saved=readStoredSession_();\n    const common=readCommonSession_();\n    try{\n      const storedValid=!!(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now()));\n      if(!storedValid&&common){\n        const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:8000});\n        if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');\n        saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};\n        clearStoredSession_();\n        saveStoredSession_(saved,false);\n      }`;
+if (resumePattern.test(html)) html = html.replace(resumePattern, resumePatch);
+if (!html.includes('const storedValid=!!(saved&&saved.token&&saved.profile')) throw new Error('stored-session-first refresh patch missing');
+if (!html.includes("if(!storedValid&&common){")) throw new Error('common session is still preferred over valid stored session');
+
 // Clear any old persisted view cache after a homework declaration. Older UI
 // revisions vary slightly here, so use a tolerant replacement and do not make
 // deployment depend on the exact one-line formatting.
@@ -79,4 +89,4 @@ if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Er
 if (!html.includes('renderProgressHeroFast_(out.data)')) throw new Error('dashboard response does not paint graph immediately');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; progress hero paints immediately from D1; autosave progress=300ms target=350ms');
+console.log('Sanitized V3 HTML; progress hero paints immediately; valid stored session wins on refresh; autosave progress=300ms target=350ms');
