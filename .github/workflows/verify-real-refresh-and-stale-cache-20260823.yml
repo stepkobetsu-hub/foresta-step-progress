@@ -1,0 +1,167 @@
+name: Verify real refresh and stale cache 20260823
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.verify-real-refresh-stale-cache-trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/homework-status-root-cause
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Build candidate
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o public/index.html
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
+          npm run check
+          grep -q "const eagerDashboardPromise=call('getStudentDashboard')" public/index.html
+          grep -q "dashboard-cache-invalid" public/index.html
+          grep -q "hasRememberedStudent" public/index.html
+          grep -q "const storedValid=!!(saved&&saved.token&&saved.profile" public/index.html
+          grep -q "done?'宿題済み':'チェック'" public/index.html
+      - name: Deploy preview
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --name step-progress-v3-real-refresh-preview --message "Preview real refresh and stale cache recovery"
+      - name: Create protected test session
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROBE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$PROBE_TOKEN"
+          cat > src/refresh-session-probe.ts <<'TS'
+          type Env={DB:D1Database;PROBE_TOKEN:string};
+          const hash=async(token:string)=>{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return Array.from(new Uint8Array(d),b=>b.toString(16).padStart(2,'0')).join('')};
+          export default {async fetch(req:Request,env:Env){
+            const supplied=(req.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
+            if(!env.PROBE_TOKEN||supplied!==env.PROBE_TOKEN)return new Response('not found',{status:404});
+            const token=`real-refresh-1100-${crypto.randomUUID()}-${crypto.randomUUID()}`;
+            const digest=await hash(token),expires=new Date(Date.now()+30*60*1000).toISOString();
+            const profile={studentId:'1100',id:'1100',name:'田中彗翔'};
+            await env.DB.prepare(`INSERT INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at) VALUES(?,?,'STUDENT',?,datetime(?),datetime('now'),datetime('now'))`).bind(digest,'1100',JSON.stringify(profile),expires).run();
+            return new Response(JSON.stringify({token,expiresAt:expires}),{headers:{'content-type':'application/json','cache-control':'no-store'}});
+          }} satisfies ExportedHandler<Env>;
+          TS
+          PROBE_TOKEN="$PROBE_TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          fs.writeFileSync('wrangler.refresh-session-probe.json',JSON.stringify({name:'step-progress-v3-real-refresh-probe',main:'src/refresh-session-probe.ts',compatibility_date:'2026-08-23',compatibility_flags:['nodejs_compat'],vars:{PROBE_TOKEN:process.env.PROBE_TOKEN},d1_databases:[{binding:'DB',database_name:'step-progress-db',database_id:'028f097c-2609-4bf7-9e9b-39b565606941'}]},null,2));
+          NODE
+          npx wrangler deploy --config wrangler.refresh-session-probe.json --message "Temporary protected real refresh probe"
+          code=000
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/session.json -w '%{http_code}' -H "Authorization: Bearer $PROBE_TOKEN" https://step-progress-v3-real-refresh-probe.stepkobetsu.workers.dev/ || true)
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || exit 1
+          echo "SESSION_TOKEN=$(node -p "require('/tmp/session.json').token")" >> "$GITHUB_ENV"
+          echo "EXPIRES_AT=$(node -p "require('/tmp/session.json').expiresAt")" >> "$GITHUB_ENV"
+      - name: Verify preview with stale common session and broken cache
+        working-directory: cloudflare
+        run: |
+          echo "::add-mask::$SESSION_TOKEN"
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+            const url='https://step-progress-v3-real-refresh-preview.stepkobetsu.workers.dev/';
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{
+              const v={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};
+              sessionStorage.setItem('fsSession',JSON.stringify(v));
+              localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(v));
+              localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');
+              localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString());
+            },{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            let started=Date.now();
+            await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+            await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:3500});
+            console.log('PREVIEW_FIRST_MS='+(Date.now()-started));
+            await page.waitForTimeout(400);
+            const mutated=await page.evaluate(()=>{
+              for(let i=0;i<localStorage.length;i++){
+                const key=localStorage.key(i);if(!key)continue;
+                try{const value=JSON.parse(localStorage.getItem(key)||'null');if(value&&typeof value==='object'&&Object.prototype.hasOwnProperty.call(value,'dashboard')){value.dashboard={broken:true};localStorage.setItem(key,JSON.stringify(value));return key}}catch{}
+              }
+              return '';
+            });
+            console.log('MUTATED_CACHE_KEY='+mutated);
+            if(!mutated)throw new Error('student dashboard cache key not found');
+            started=Date.now();
+            await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+            const loginVisibility=await page.evaluate(()=>{const el=document.getElementById('login');return el?getComputedStyle(el).visibility:'missing'});
+            if(loginVisibility!=='hidden')throw new Error('login became visible during valid-session refresh: '+loginVisibility);
+            await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:3500});
+            console.log('PREVIEW_BROKEN_CACHE_RECOVERY_MS='+(Date.now()-started));
+            if(errors.length)console.log('PREVIEW_PAGE_ERRORS='+JSON.stringify(errors));
+            await page.close();
+
+            const remembered=await browser.newPage();
+            await remembered.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await remembered.evaluate(()=>{
+              sessionStorage.clear();
+              localStorage.removeItem('forestaProgress.rememberedSession');
+              localStorage.removeItem('stepCommonStudentSessionToken');
+              localStorage.removeItem('stepCommonStudentSessionExpiresAt');
+              localStorage.setItem('forestaProgress.rememberLogin.student','true');
+              localStorage.setItem('forestaProgress.savedId.student','1320');
+              localStorage.setItem('forestaProgress.savedPassword.student','intentionally-invalid-for-visibility-test');
+            });
+            await remembered.reload({waitUntil:'domcontentloaded',timeout:30000});
+            const prehide=await remembered.evaluate(()=>({pending:document.documentElement.classList.contains('auth-resume-pending'),visibility:getComputedStyle(document.getElementById('login')).visibility}));
+            console.log('REMEMBERED_STUDENT_PREHIDE='+JSON.stringify(prehide));
+            if(!prehide.pending||prehide.visibility!=='hidden')throw new Error('remembered student login flashes on refresh');
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+      - name: Deploy production
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Keep student inside app and always refresh graph"
+      - name: Verify production with stale common session and broken cache
+        working-directory: cloudflare
+        run: |
+          echo "::add-mask::$SESSION_TOKEN"
+          sleep 3
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true}),page=await browser.newPage();
+            await page.goto('https://step-progress-api.stepkobetsu.workers.dev/',{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{const v={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(v));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(v));localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString())},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            let t=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});console.log('PROD_FIRST_MS='+(Date.now()-t));
+            await page.waitForTimeout(400);
+            const mutated=await page.evaluate(()=>{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(!key)continue;try{const v=JSON.parse(localStorage.getItem(key)||'null');if(v&&typeof v==='object'&&Object.prototype.hasOwnProperty.call(v,'dashboard')){v.dashboard={broken:true};localStorage.setItem(key,JSON.stringify(v));return key}}catch{}}return ''});if(!mutated)throw new Error('production dashboard cache key not found');
+            t=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});const visibility=await page.evaluate(()=>getComputedStyle(document.getElementById('login')).visibility);if(visibility!=='hidden')throw new Error('production login visible during refresh');await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});console.log('PROD_BROKEN_CACHE_RECOVERY_MS='+(Date.now()-t));
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
+          cat /tmp/health.json
+          node -e 'const h=require("/tmp/health.json");process.exit(h.ok===true&&h.progressCount===3540&&h.targetCount===6555&&h.homeworkCount===2271?0:1)'
