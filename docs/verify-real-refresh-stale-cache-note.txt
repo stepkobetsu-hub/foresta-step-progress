@@ -1,0 +1,1 @@
+One-time verification branch. No persistent production asset changes are stored here. Workflow checks current codex branch, deploys preview, verifies refresh/stale cache behavior, then deploys production only after success.
