@@ -1,0 +1,145 @@
+name: Fix refresh session and graph 20260823
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.fix-refresh-session-graph-trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/homework-status-root-cause
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Build candidate
+        working-directory: cloudflare
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o public/index.html
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
+          npm run check
+          grep -q "renderProgressHeroFast_(out.data)" public/index.html
+          grep -q "const storedValid=!!(saved&&saved.token&&saved.profile" public/index.html
+          grep -q "if(!storedValid&&common){" public/index.html
+          grep -q "done?'宿題済み':'チェック'" public/index.html
+      - name: Deploy preview
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --name step-progress-v3-refresh-fix-preview --message "Preview refresh session and graph fix"
+      - name: Create protected test session
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROBE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$PROBE_TOKEN"
+          cat > src/refresh-session-probe.ts <<'TS'
+          type Env={DB:D1Database;PROBE_TOKEN:string};
+          const hash=async(token:string)=>{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return Array.from(new Uint8Array(d),b=>b.toString(16).padStart(2,'0')).join('')};
+          export default {async fetch(req:Request,env:Env){
+            const supplied=(req.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
+            if(!env.PROBE_TOKEN||supplied!==env.PROBE_TOKEN)return new Response('not found',{status:404});
+            const token=`refresh-1100-${crypto.randomUUID()}-${crypto.randomUUID()}`;
+            const digest=await hash(token),expires=new Date(Date.now()+30*60*1000).toISOString();
+            const profile={studentId:'1100',id:'1100',name:'田中彗翔'};
+            await env.DB.prepare(`INSERT INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at) VALUES(?,?,'STUDENT',?,datetime(?),datetime('now'),datetime('now'))`).bind(digest,'1100',JSON.stringify(profile),expires).run();
+            return new Response(JSON.stringify({token,expiresAt:expires}),{headers:{'content-type':'application/json','cache-control':'no-store'}});
+          }} satisfies ExportedHandler<Env>;
+          TS
+          PROBE_TOKEN="$PROBE_TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          fs.writeFileSync('wrangler.refresh-session-probe.json',JSON.stringify({name:'step-progress-v3-refresh-session-probe',main:'src/refresh-session-probe.ts',compatibility_date:'2026-08-23',compatibility_flags:['nodejs_compat'],vars:{PROBE_TOKEN:process.env.PROBE_TOKEN},d1_databases:[{binding:'DB',database_name:'step-progress-db',database_id:'028f097c-2609-4bf7-9e9b-39b565606941'}]},null,2));
+          NODE
+          npx wrangler deploy --config wrangler.refresh-session-probe.json --message "Temporary protected refresh session probe"
+          code=000
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/session.json -w '%{http_code}' -H "Authorization: Bearer $PROBE_TOKEN" https://step-progress-v3-refresh-session-probe.stepkobetsu.workers.dev/ || true)
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || exit 1
+          echo "SESSION_TOKEN=$(node -p "require('/tmp/session.json').token")" >> "$GITHUB_ENV"
+          echo "EXPIRES_AT=$(node -p "require('/tmp/session.json').expiresAt")" >> "$GITHUB_ENV"
+      - name: Verify preview refresh twice
+        working-directory: cloudflare
+        run: |
+          echo "::add-mask::$SESSION_TOKEN"
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true}),page=await browser.newPage();
+            await page.goto('https://step-progress-v3-refresh-fix-preview.stepkobetsu.workers.dev/',{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{
+              const value={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};
+              sessionStorage.setItem('fsSession',JSON.stringify(value));
+              localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(value));
+              localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');
+              localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString());
+            },{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            for(let i=1;i<=2;i++){
+              const started=Date.now();
+              await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+              await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});
+              const elapsed=Date.now()-started;
+              const body=await page.locator('body').innerText();
+              if(body.includes('生徒ログイン')&&!body.includes('田中彗翔'))throw new Error('refresh returned to login');
+              console.log(`PREVIEW_REFRESH_${i}_MS=${elapsed}`);
+              if(elapsed>5000)throw new Error('preview graph too slow');
+            }
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+      - name: Deploy production
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Keep student signed in on refresh and render graph immediately"
+      - name: Verify production refresh twice
+        working-directory: cloudflare
+        run: |
+          echo "::add-mask::$SESSION_TOKEN"
+          sleep 3
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true}),page=await browser.newPage();
+            await page.goto('https://step-progress-api.stepkobetsu.workers.dev/',{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{
+              const value={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};
+              sessionStorage.setItem('fsSession',JSON.stringify(value));
+              localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(value));
+              localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');
+              localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString());
+            },{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            for(let i=1;i<=2;i++){
+              const started=Date.now();
+              await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+              await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:8000});
+              const elapsed=Date.now()-started;
+              const body=await page.locator('body').innerText();
+              if(body.includes('生徒ログイン')&&!body.includes('田中彗翔'))throw new Error('production refresh returned to login');
+              console.log(`PRODUCTION_REFRESH_${i}_MS=${elapsed}`);
+            }
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
+          cat /tmp/health.json
+          node -e 'const h=require("/tmp/health.json");process.exit(h.ok===true&&h.progressCount===3540&&h.targetCount===6555&&h.homeworkCount===2271?0:1)'
