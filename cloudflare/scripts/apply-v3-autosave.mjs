@@ -14,7 +14,7 @@ html = html
 // When a personal-device student session has expired but remembered credentials
 // are available, keep the login UI hidden while the existing automatic login
 // runs. This avoids the visible "logged out" flash on refresh.
-if (!html.includes("forestaProgress.rememberLogin.student")) {
+if (!html.includes("const hasRememberedStudent = localStorage.getItem('forestaProgress.rememberLogin.student')")) {
   const preAuthPattern = /(const hasRememberedStaff = localStorage\.getItem\('forestaProgress\.rememberLogin\.staff'\) === 'true'\s*&& !!localStorage\.getItem\('forestaProgress\.savedId\.staff'\)\s*&& !!localStorage\.getItem\('forestaProgress\.savedPassword\.staff'\);)\s*if \(hasCommonSession \|\| hasStoredSession \|\| hasRememberedStaff\) document\.documentElement\.classList\.add\('auth-resume-pending'\);/;
   const preAuthPatch = `$1\n      const hasRememberedStudent = localStorage.getItem('forestaProgress.rememberLogin.student') === 'true'\n        && !!localStorage.getItem('forestaProgress.savedId.student')\n        && !!localStorage.getItem('forestaProgress.savedPassword.student');\n      if (hasCommonSession || hasStoredSession || hasRememberedStaff || hasRememberedStudent) document.documentElement.classList.add('auth-resume-pending');`;
   if (!preAuthPattern.test(html)) throw new Error('remembered student pre-auth point not found');
