@@ -41,7 +41,8 @@ jobs:
           npm run check
           grep -q "const eagerDashboardPromise=call('getStudentDashboard')" public/index.html
           grep -q "dashboard-cache-invalid" public/index.html
-          grep -q "v3-student-resume-prehide" public/index.html
+          grep -q "v3-resume-prehide" public/index.html
+          grep -q "v3-auth-resume-hide" public/index.html
           grep -q "const storedValid=!!(saved&&saved.token&&saved.profile" public/index.html
           grep -q "done?'宿題済み':'チェック'" public/index.html
       - name: Deploy preview
@@ -102,6 +103,8 @@ jobs:
             },{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
             let started=Date.now();
             await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+            const firstVisibility=await page.evaluate(()=>getComputedStyle(document.getElementById('login')).visibility);
+            if(firstVisibility!=='hidden')throw new Error('login visible on first valid-session refresh: '+firstVisibility);
             await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:3500});
             console.log('PREVIEW_FIRST_MS='+(Date.now()-started));
             await page.waitForTimeout(400);
@@ -117,7 +120,7 @@ jobs:
             started=Date.now();
             await page.reload({waitUntil:'domcontentloaded',timeout:30000});
             const loginVisibility=await page.evaluate(()=>{const el=document.getElementById('login');return el?getComputedStyle(el).visibility:'missing'});
-            if(loginVisibility!=='hidden')throw new Error('login became visible during valid-session refresh: '+loginVisibility);
+            if(loginVisibility!=='hidden')throw new Error('login became visible during broken-cache refresh: '+loginVisibility);
             await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:3500});
             console.log('PREVIEW_BROKEN_CACHE_RECOVERY_MS='+(Date.now()-started));
             if(errors.length)console.log('PREVIEW_PAGE_ERRORS='+JSON.stringify(errors));
@@ -155,10 +158,10 @@ jobs:
             const browser=await chromium.launch({headless:true}),page=await browser.newPage();
             await page.goto('https://step-progress-api.stepkobetsu.workers.dev/',{waitUntil:'domcontentloaded',timeout:30000});
             await page.evaluate(({token,expiresAt})=>{const v={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(v));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(v));localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString())},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
-            let t=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});console.log('PROD_FIRST_MS='+(Date.now()-t));
+            let t=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});let visibility=await page.evaluate(()=>getComputedStyle(document.getElementById('login')).visibility);if(visibility!=='hidden')throw new Error('production login visible on first refresh');await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});console.log('PROD_FIRST_MS='+(Date.now()-t));
             await page.waitForTimeout(400);
             const mutated=await page.evaluate(()=>{for(let i=0;i<localStorage.length;i++){const key=localStorage.key(i);if(!key)continue;try{const v=JSON.parse(localStorage.getItem(key)||'null');if(v&&typeof v==='object'&&Object.prototype.hasOwnProperty.call(v,'dashboard')){v.dashboard={broken:true};localStorage.setItem(key,JSON.stringify(v));return key}}catch{}}return ''});if(!mutated)throw new Error('production dashboard cache key not found');
-            t=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});const visibility=await page.evaluate(()=>getComputedStyle(document.getElementById('login')).visibility);if(visibility!=='hidden')throw new Error('production login visible during refresh');await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});console.log('PROD_BROKEN_CACHE_RECOVERY_MS='+(Date.now()-t));
+            t=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});visibility=await page.evaluate(()=>getComputedStyle(document.getElementById('login')).visibility);if(visibility!=='hidden')throw new Error('production login visible during broken-cache refresh');await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:5000});console.log('PROD_BROKEN_CACHE_RECOVERY_MS='+(Date.now()-t));
             await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
