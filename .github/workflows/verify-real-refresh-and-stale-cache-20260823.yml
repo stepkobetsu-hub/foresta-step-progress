@@ -41,7 +41,7 @@ jobs:
           npm run check
           grep -q "const eagerDashboardPromise=call('getStudentDashboard')" public/index.html
           grep -q "dashboard-cache-invalid" public/index.html
-          grep -q "hasRememberedStudent" public/index.html
+          grep -q "v3-student-resume-prehide" public/index.html
           grep -q "const storedValid=!!(saved&&saved.token&&saved.profile" public/index.html
           grep -q "done?'宿題済み':'チェック'" public/index.html
       - name: Deploy preview
