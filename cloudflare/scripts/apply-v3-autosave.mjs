@@ -73,6 +73,17 @@ if (resumePattern.test(html)) html = html.replace(resumePattern, resumePatch);
 if (!html.includes('const storedValid=!!(saved&&saved.token&&saved.profile')) throw new Error('stored-session-first refresh patch missing');
 if (!html.includes("if(!storedValid&&common){")) throw new Error('common session is still preferred over valid stored session');
 
+// Homework rendering can replace the shell after the progress hero already
+// appeared. Restore the cached hero after every homework renderer completes.
+const homeworkHeroMarker = 'v3-homework-preserve-progress-hero';
+if (!html.includes(homeworkHeroMarker)) {
+  const teacherNeedle = '  async function renderTeacher(){';
+  if (!html.includes(teacherNeedle)) throw new Error('renderTeacher patch point missing');
+  const wrapper = `  // ${homeworkHeroMarker}\n  const renderStudentHomeworkBase_=renderStudentHomework_;\n  renderStudentHomework_=async function(...args){const result=await renderStudentHomeworkBase_(...args);if(state.dashboardCache)renderProgressHeroFast_(state.dashboardCache);return result};\n  if(typeof renderStudentHomeworkOnly_==='function'){const renderStudentHomeworkOnlyBase_=renderStudentHomeworkOnly_;renderStudentHomeworkOnly_=async function(...args){const result=await renderStudentHomeworkOnlyBase_(...args);if(state.dashboardCache)renderProgressHeroFast_(state.dashboardCache);return result}}\n`;
+  html = html.replace(teacherNeedle, wrapper + teacherNeedle);
+}
+if (!html.includes(homeworkHeroMarker)) throw new Error('homework graph preservation patch missing');
+
 const declarePatterns = [
   ["state.homeworkCache=null;endSave_();await renderStudentHomework_()", "state.homeworkCache=null;clearStudentViewCache_();endSave_();await renderStudentHomework_()"],
   ["endSave_();await renderStudentHomework_()", "state.homeworkCache=null;clearStudentViewCache_();endSave_();await renderStudentHomework_()"],
@@ -89,6 +100,7 @@ if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Er
 if (!html.includes('renderProgressHeroFast_(out.data)')) throw new Error('dashboard response does not paint graph immediately');
 if (!html.includes("const eagerDashboardPromise=call('getStudentDashboard')")) throw new Error('dashboard is not revalidated on every app open');
 if (!html.includes(resumePrehideMarker) || !html.includes('v3-auth-resume-hide')) throw new Error('resume prehide missing');
+if (!html.includes(homeworkHeroMarker)) throw new Error('homework graph preservation missing');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; all resumable sessions stay visually inside app; dashboard cache is guarded and always revalidated; autosave progress=300ms target=350ms');
+console.log('Sanitized V3 HTML; graph remains visible after homework render; resumable sessions stay visually inside app');
