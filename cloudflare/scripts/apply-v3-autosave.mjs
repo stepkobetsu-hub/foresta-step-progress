@@ -84,6 +84,18 @@ if (!html.includes(homeworkHeroMarker)) {
 }
 if (!html.includes(homeworkHeroMarker)) throw new Error('homework graph preservation patch missing');
 
+// The fast hero is only a placeholder while the normal student render is being
+// prepared. Once the normal render finishes it already contains the same graph,
+// so remove the temporary mount to prevent two identical graphs remaining.
+const singleHeroMarker = 'v3-fast-progress-replace-on-full-render';
+if (!html.includes(singleHeroMarker)) {
+  const teacherNeedle = '  async function renderTeacher(){';
+  if (!html.includes(teacherNeedle)) throw new Error('renderTeacher patch point missing for single hero');
+  const wrapper = `  // ${singleHeroMarker}\n  const renderStudentFullBase_=renderStudent;\n  renderStudent=async function(...args){const result=await renderStudentFullBase_(...args);const fast=$('main')?.querySelector('[data-fast-progress-hero]');if(fast)fast.remove();return result};\n`;
+  html = html.replace(teacherNeedle, wrapper + teacherNeedle);
+}
+if (!html.includes(singleHeroMarker)) throw new Error('single progress hero replacement patch missing');
+
 const declarePatterns = [
   ["state.homeworkCache=null;endSave_();await renderStudentHomework_()", "state.homeworkCache=null;clearStudentViewCache_();endSave_();await renderStudentHomework_()"],
   ["endSave_();await renderStudentHomework_()", "state.homeworkCache=null;clearStudentViewCache_();endSave_();await renderStudentHomework_()"],
@@ -101,6 +113,7 @@ if (!html.includes('renderProgressHeroFast_(out.data)')) throw new Error('dashbo
 if (!html.includes("const eagerDashboardPromise=call('getStudentDashboard')")) throw new Error('dashboard is not revalidated on every app open');
 if (!html.includes(resumePrehideMarker) || !html.includes('v3-auth-resume-hide')) throw new Error('resume prehide missing');
 if (!html.includes(homeworkHeroMarker)) throw new Error('homework graph preservation missing');
+if (!html.includes(singleHeroMarker)) throw new Error('single progress hero replacement missing');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; graph remains visible after homework render; resumable sessions stay visually inside app');
+console.log('Sanitized V3 HTML; fast graph is replaced by the normal graph after full render; resumable sessions stay visually inside app');
