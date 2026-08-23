@@ -1,0 +1,172 @@
+name: Verify and deploy V3 logout hotfix 20260823
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.verify-v3-logout-hotfix-pr-trigger'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-deploy-v3-logout-hotfix-20260823
+  cancel-in-progress: true
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
+    steps:
+      - name: Check out V3 implementation
+        uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Build hotfix candidate
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o public/index.html
+          test "$(wc -c < public/index.html)" -gt 50000
+          head -n 1 public/index.html | grep -qi '<!doctype html>'
+          grep -q '</html>' public/index.html
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
+          npm run check
+          grep -q "localStorage.setItem('forestaProgress.manualLogout','true')" public/index.html
+          grep -q "setLoginType('student');finishAuthResume_();button.disabled=false" public/index.html
+          grep -q "localStorage.removeItem('forestaProgress.manualLogout')" public/index.html
+          grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' public/index.html
+          grep -q 'applyHomeworkCheckToCache_(out.homework)' public/index.html
+
+      - name: Deploy preview
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --name step-progress-v3-logout-hotfix-preview --message "Preview logout returns to student login"
+
+      - name: Verify preview login switching
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/preview.html -w '%{http_code}' -H 'Cache-Control: no-cache' https://step-progress-v3-logout-hotfix-preview.stepkobetsu.workers.dev/ || true)
+            [ "$code" = "200" ] && grep -q "forestaProgress.manualLogout" /tmp/preview.html && break
+            sleep 3
+          done
+          [ "$code" = "200" ]
+          grep -q "forestaProgress.manualLogout" /tmp/preview.html
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            const url='https://step-progress-v3-logout-hotfix-preview.stepkobetsu.workers.dev/';
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(()=>{
+              localStorage.setItem('forestaProgress.rememberLogin.staff','true');
+              localStorage.setItem('forestaProgress.savedId.staff','remembered-teacher');
+              localStorage.setItem('forestaProgress.savedPassword.staff','remembered-password');
+              localStorage.setItem('forestaProgress.loginType','staff');
+              localStorage.setItem('forestaProgress.manualLogout','true');
+              sessionStorage.removeItem('fsSession');
+              localStorage.removeItem('forestaProgress.rememberedSession');
+              localStorage.removeItem('stepCommonStudentSessionToken');
+              localStorage.removeItem('stepCommonStudentSessionExpiresAt');
+            });
+            await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+            await page.waitForFunction(()=>document.getElementById('login') && !document.getElementById('login').classList.contains('hidden'),null,{timeout:8000});
+            await page.waitForTimeout(1500);
+            const result=await page.evaluate(()=>({
+              loginVisible:!document.getElementById('login').classList.contains('hidden'),
+              appHidden:document.getElementById('application').classList.contains('hidden'),
+              studentActive:document.getElementById('studentTab').classList.contains('active'),
+              title:document.getElementById('loginTitle').textContent,
+              loginTypeTitle:document.getElementById('idLabel').textContent,
+              idValue:document.getElementById('loginId').value,
+              buttonText:document.getElementById('loginButton').textContent,
+              marker:localStorage.getItem('forestaProgress.manualLogout')
+            }));
+            console.log(result);
+            if(!result.loginVisible||!result.appHidden||!result.studentActive||result.title!=='生徒ログイン'||result.loginTypeTitle!=='生徒番号'||result.idValue!==''||result.buttonText!=='ログイン'||result.marker!=='true'){
+              throw new Error('preview did not remain on student login after explicit logout marker');
+            }
+            await browser.close();
+          })().catch(error=>{console.error(error);process.exit(1)});
+          NODE
+
+      - name: Deploy production
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Fix logout returning to remembered staff login"
+
+      - name: Verify production source health and login switching
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/production.html -w '%{http_code}' -H 'Cache-Control: no-cache' "https://step-progress-api.stepkobetsu.workers.dev/?logout-hotfix-check=${GITHUB_RUN_ID}-${attempt}" || true)
+            [ "$code" = "200" ] && grep -q "forestaProgress.manualLogout" /tmp/production.html && break
+            sleep 3
+          done
+          [ "$code" = "200" ]
+          grep -q "localStorage.setItem('forestaProgress.manualLogout','true')" /tmp/production.html
+          grep -q "setLoginType('student');finishAuthResume_();button.disabled=false" /tmp/production.html
+          grep -q "localStorage.removeItem('forestaProgress.manualLogout')" /tmp/production.html
+          curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
+          cat /tmp/health.json
+          node -e 'const h=require("/tmp/health.json");process.exit(h.ok===true&&h.mode==="d1-isolated-autosave"?0:1)'
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            const url='https://step-progress-api.stepkobetsu.workers.dev/';
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(()=>{
+              localStorage.setItem('forestaProgress.rememberLogin.staff','true');
+              localStorage.setItem('forestaProgress.savedId.staff','remembered-teacher');
+              localStorage.setItem('forestaProgress.savedPassword.staff','remembered-password');
+              localStorage.setItem('forestaProgress.loginType','staff');
+              localStorage.setItem('forestaProgress.manualLogout','true');
+              sessionStorage.removeItem('fsSession');
+              localStorage.removeItem('forestaProgress.rememberedSession');
+              localStorage.removeItem('stepCommonStudentSessionToken');
+              localStorage.removeItem('stepCommonStudentSessionExpiresAt');
+            });
+            await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+            await page.waitForFunction(()=>document.getElementById('login') && !document.getElementById('login').classList.contains('hidden'),null,{timeout:10000});
+            await page.waitForTimeout(1500);
+            const result=await page.evaluate(()=>({
+              loginVisible:!document.getElementById('login').classList.contains('hidden'),
+              appHidden:document.getElementById('application').classList.contains('hidden'),
+              studentActive:document.getElementById('studentTab').classList.contains('active'),
+              title:document.getElementById('loginTitle').textContent,
+              idValue:document.getElementById('loginId').value,
+              buttonText:document.getElementById('loginButton').textContent,
+              marker:localStorage.getItem('forestaProgress.manualLogout')
+            }));
+            console.log(result);
+            if(!result.loginVisible||!result.appHidden||!result.studentActive||result.title!=='生徒ログイン'||result.idValue!==''||result.buttonText!=='ログイン'||result.marker!=='true'){
+              throw new Error('production did not remain on student login after explicit logout marker');
+            }
+            await browser.close();
+          })().catch(error=>{console.error(error);process.exit(1)});
+          NODE
