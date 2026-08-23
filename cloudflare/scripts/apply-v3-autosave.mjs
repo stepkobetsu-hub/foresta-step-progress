@@ -11,16 +11,16 @@ html = html
   .replaceAll("status.textContent='変更あり'", "status.textContent='自動保存待ち…'")
   .replaceAll("setGlobalSave_('保存する','pending')", "setGlobalSave_('自動保存待ち…','pending')");
 
-// Keep the login screen hidden while remembered student credentials perform the
-// existing automatic sign-in. Inject this independently of the legacy head code
-// so changes in the old HTML cannot break the patch point.
-const studentPrehideMarker = 'v3-student-resume-prehide';
-if (!html.includes(studentPrehideMarker)) {
-  const studentPrehide = `<script id="${studentPrehideMarker}">\ntry{\n  const rememberedStudent=localStorage.getItem('forestaProgress.rememberLogin.student')==='true'\n    && !!localStorage.getItem('forestaProgress.savedId.student')\n    && !!localStorage.getItem('forestaProgress.savedPassword.student');\n  if(rememberedStudent)document.documentElement.classList.add('auth-resume-pending');\n}catch(error){}\n</script>\n`;
-  if (!html.includes('</head>')) throw new Error('head end not found for remembered student prehide');
-  html = html.replace('</head>', studentPrehide + '</head>');
+// Hide the login pane before body paint whenever this device has any viable
+// resume path: valid app session, valid common session, or remembered credentials.
+// Inject both the style and detection independently of legacy head code.
+const resumePrehideMarker = 'v3-resume-prehide';
+if (!html.includes(resumePrehideMarker)) {
+  const resumePrehide = `<style id="v3-auth-resume-hide">html.auth-resume-pending #login{visibility:hidden!important}</style>\n<script id="${resumePrehideMarker}">\ntry{\n  const now=Date.now();\n  let stored=null;\n  const raw=sessionStorage.getItem('fsSession')||localStorage.getItem('forestaProgress.rememberedSession')||'';\n  try{stored=raw?JSON.parse(raw):null}catch(error){}\n  const storedValid=!!(stored&&stored.token&&stored.profile&&(!stored.expiresAt||new Date(stored.expiresAt).getTime()>now));\n  const commonExpires=new Date(localStorage.getItem('stepCommonStudentSessionExpiresAt')||'').getTime();\n  const commonValid=!!localStorage.getItem('stepCommonStudentSessionToken')&&commonExpires>now;\n  const rememberedStudent=localStorage.getItem('forestaProgress.rememberLogin.student')==='true'\n    && !!localStorage.getItem('forestaProgress.savedId.student')\n    && !!localStorage.getItem('forestaProgress.savedPassword.student');\n  const rememberedStaff=localStorage.getItem('forestaProgress.rememberLogin.staff')==='true'\n    && !!localStorage.getItem('forestaProgress.savedId.staff')\n    && !!localStorage.getItem('forestaProgress.savedPassword.staff');\n  if(storedValid||commonValid||rememberedStudent||rememberedStaff)document.documentElement.classList.add('auth-resume-pending');\n}catch(error){}\n</script>\n`;
+  if (!html.includes('</head>')) throw new Error('head end not found for auth resume prehide');
+  html = html.replace('</head>', resumePrehide + '</head>');
 }
-if (!html.includes(studentPrehideMarker)) throw new Error('remembered student prehide injection missing');
+if (!html.includes(resumePrehideMarker) || !html.includes('v3-auth-resume-hide')) throw new Error('auth resume prehide injection missing');
 
 const loadHomeworkNeedle = 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null';
 if (!html.includes(loadHomeworkNeedle) && !html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCache=null')) throw new Error('student homework cache load point not found');
@@ -47,8 +47,6 @@ if (html.includes(oldLandingCached)) html = html.replace(oldLandingCached, landi
 else if (html.includes(landingNeedle) && !html.includes('state.dashboardCache&&!renderProgressHeroFast_')) html = html.replace(landingNeedle, landingPatched);
 if (!html.includes('state.dashboardCache&&!renderProgressHeroFast_(state.dashboardCache)')) throw new Error('invalid cached dashboard recovery patch missing');
 
-// Cache is only for instant paint. Always refresh the dashboard once from D1 so
-// old browser state can never suppress the real graph request.
 const conditionalEager = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard').then(out=>{if(out?.data){state.dashboardCache=out.data;saveStudentViewCache_();renderProgressHeroFast_(out.data)}return out}):null;";
 const veryOldEager = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard'):null;";
 const eagerNeedle = "const eagerDashboardPromise=call('getStudentDashboard').then(out=>{if(out?.data){state.dashboardCache=out.data;saveStudentViewCache_();renderProgressHeroFast_(out.data)}return out});";
@@ -69,7 +67,6 @@ if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard completion 
 if (html.includes(earlyBackgroundNeedle)) throw new Error('old delayed dashboard scheduling still present in student landing path');
 if (html.includes(settledNeedle)) throw new Error('duplicate dashboard request path still present');
 
-// Prefer a still-valid app session over the shared common-session token on refresh.
 const resumePattern = /let saved=null;\s*const common=readCommonSession_\(\);\s*try\{\s*if\(common\)\{\s*const verified=await rpc\(\{action:'getCommonStudentSession',token:common\.token\},\{attempts:1,timeoutMs:30000\}\);\s*if\(!verified\.success\|\|verified\.role!=='STUDENT'\|\|!verified\.profile\)throw new Error\('COMMON_SESSION_INVALID'\);\s*saved=\{token:common\.token,role:'STUDENT',profile:verified\.profile,expiresAt:common\.expiresAt\};\s*clearStoredSession_\(\);\s*saveStoredSession_\(saved,false\);\s*\}else saved=readStoredSession_\(\);/;
 const resumePatch = `let saved=readStoredSession_();\n    const common=readCommonSession_();\n    try{\n      const storedValid=!!(saved&&saved.token&&saved.profile&&(!saved.expiresAt||new Date(saved.expiresAt).getTime()>Date.now()));\n      if(!storedValid&&common){\n        const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:8000});\n        if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');\n        saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};\n        clearStoredSession_();\n        saveStoredSession_(saved,false);\n      }`;
 if (resumePattern.test(html)) html = html.replace(resumePattern, resumePatch);
@@ -91,7 +88,7 @@ if (!html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCa
 if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Error('homework is still persisted in student view cache');
 if (!html.includes('renderProgressHeroFast_(out.data)')) throw new Error('dashboard response does not paint graph immediately');
 if (!html.includes("const eagerDashboardPromise=call('getStudentDashboard')")) throw new Error('dashboard is not revalidated on every app open');
-if (!html.includes(studentPrehideMarker)) throw new Error('remembered student resume prehide missing');
+if (!html.includes(resumePrehideMarker) || !html.includes('v3-auth-resume-hide')) throw new Error('resume prehide missing');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; student refresh stays visually inside app; dashboard cache is guarded and always revalidated; autosave progress=300ms target=350ms');
+console.log('Sanitized V3 HTML; all resumable sessions stay visually inside app; dashboard cache is guarded and always revalidated; autosave progress=300ms target=350ms');
