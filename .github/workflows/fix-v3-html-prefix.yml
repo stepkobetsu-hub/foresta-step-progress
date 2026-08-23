@@ -58,19 +58,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SESSION_TOKEN="refresh-browser-$(openssl rand -hex 32)"
-          echo "::add-mask::$SESSION_TOKEN"
-          export SESSION_TOKEN
-          node <<'NODE'
-          const fs=require('fs'),crypto=require('crypto');
-          const token=process.env.SESSION_TOKEN;
-          const hash=crypto.createHash('sha256').update(token).digest('hex');
-          const expires=new Date(Date.now()+30*60*1000).toISOString();
-          const profile=JSON.stringify({studentId:'1100',id:'1100',name:'田中彗翔'}).replaceAll("'","''");
-          fs.writeFileSync('/tmp/browser-session.sql',`INSERT OR REPLACE INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at) VALUES('${hash}','1100','STUDENT','${profile}',datetime('${expires}'),datetime('now'),datetime('now'));\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV,`SESSION_TOKEN=${token}\nEXPIRES_AT=${expires}\n`);
+          PROBE_TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$PROBE_TOKEN"
+          cat > src/refresh-session-probe.ts <<'TS'
+          type Env={DB:D1Database;PROBE_TOKEN:string};
+          const hash=async(token:string)=>{const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return Array.from(new Uint8Array(d),b=>b.toString(16).padStart(2,'0')).join('')};
+          export default {async fetch(req:Request,env:Env){
+            const supplied=(req.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
+            if(!env.PROBE_TOKEN||supplied!==env.PROBE_TOKEN)return new Response('not found',{status:404});
+            const token=`refresh-1100-${crypto.randomUUID()}-${crypto.randomUUID()}`;
+            const digest=await hash(token),expires=new Date(Date.now()+30*60*1000).toISOString();
+            const profile={studentId:'1100',id:'1100',name:'田中彗翔'};
+            await env.DB.prepare(`INSERT INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at) VALUES(?,?,'STUDENT',?,datetime(?),datetime('now'),datetime('now'))`).bind(digest,'1100',JSON.stringify(profile),expires).run();
+            return new Response(JSON.stringify({token,expiresAt:expires}),{headers:{'content-type':'application/json','cache-control':'no-store'}});
+          }} satisfies ExportedHandler<Env>;
+          TS
+          PROBE_TOKEN="$PROBE_TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          fs.writeFileSync('wrangler.refresh-session-probe.json',JSON.stringify({name:'step-progress-v3-refresh-session-probe',main:'src/refresh-session-probe.ts',compatibility_date:'2026-08-23',compatibility_flags:['nodejs_compat'],vars:{PROBE_TOKEN:process.env.PROBE_TOKEN},d1_databases:[{binding:'DB',database_name:'step-progress-db',database_id:'028f097c-2609-4bf7-9e9b-39b565606941'}]},null,2));
           NODE
-          npx wrangler d1 execute step-progress-db --remote --file /tmp/browser-session.sql
+          npx wrangler deploy --config wrangler.refresh-session-probe.json --message "Temporary protected refresh session probe"
+          code=000
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/session.json -w '%{http_code}' -H "Authorization: Bearer $PROBE_TOKEN" https://step-progress-v3-refresh-session-probe.stepkobetsu.workers.dev/ || true)
+            [ "$code" = "200" ] && break
+            sleep 3
+          done
+          [ "$code" = "200" ] || exit 1
+          SESSION_TOKEN="$(node -p "require('/tmp/session.json').token")"
+          EXPIRES_AT="$(node -p "require('/tmp/session.json').expiresAt")"
+          echo "::add-mask::$SESSION_TOKEN"
+          echo "SESSION_TOKEN=$SESSION_TOKEN" >> "$GITHUB_ENV"
+          echo "EXPIRES_AT=$EXPIRES_AT" >> "$GITHUB_ENV"
       - name: Verify refresh twice in real browser
         working-directory: cloudflare
         shell: bash
