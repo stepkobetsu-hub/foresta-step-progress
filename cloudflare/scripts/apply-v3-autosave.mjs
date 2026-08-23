@@ -37,12 +37,15 @@ for (const [needle,replacement] of declarePatterns) {
 // for convenience, but after logout force the visible screen back to the
 // student login tab. The marker survives reload and is cleared only by a new
 // successful login.
+// Newer UI revisions have an early auth-resume prehide script. Older recovery
+// snapshots do not. Patch it when present, but do not require it.
 const manualLogoutBootstrapNeedle = "if (hasCommonSession || hasStoredSession || hasRememberedStaff) document.documentElement.classList.add('auth-resume-pending');";
-if (!html.includes(manualLogoutBootstrapNeedle)) throw new Error('auth resume bootstrap point not found');
-html = html.replace(
-  manualLogoutBootstrapNeedle,
-  "const manualLogout = localStorage.getItem('forestaProgress.manualLogout') === 'true';\n      if (!manualLogout && (hasCommonSession || hasStoredSession || hasRememberedStaff)) document.documentElement.classList.add('auth-resume-pending');"
-);
+if (html.includes(manualLogoutBootstrapNeedle)) {
+  html = html.replace(
+    manualLogoutBootstrapNeedle,
+    "const manualLogout = localStorage.getItem('forestaProgress.manualLogout') === 'true';\n      if (!manualLogout && (hasCommonSession || hasStoredSession || hasRememberedStaff)) document.documentElement.classList.add('auth-resume-pending');"
+  );
+}
 
 const loginSuccessNeedle = "updateRememberedLogin_(loginType,enteredId,enteredPassword,$('rememberLogin').checked);$('password').value='';";
 if (!html.includes(loginSuccessNeedle)) throw new Error('login success point not found');
