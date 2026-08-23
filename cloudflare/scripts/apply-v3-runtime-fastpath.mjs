@@ -51,20 +51,19 @@ src = src.replace(targetNeedle, targetReplacement);
 
 const homeworkOwnerNeedle = `  const byId=await homeworkStudentIds(env,ids);
   for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
-if (!src.includes(homeworkOwnerNeedle)) throw new Error('Homework owner validation point not found');
 const homeworkOwnerReplacement = `  const byId=await homeworkStudentIds(env,ids);
   if(session.role==="STUDENT"&&action==="declareHomework"){
     for(const id of ids){if(!byId.get(id))byId.set(id,session.userId);}
   }
   for(const id of ids){const owner=byId.get(id)||"";if(!owner||(session.role==="STUDENT"&&owner!==session.userId))return json({success:false,error:"宿題の生徒を特定できません。"},403);}`;
-src = src.replace(homeworkOwnerNeedle, homeworkOwnerReplacement);
+if (src.includes(homeworkOwnerNeedle)) src = src.replace(homeworkOwnerNeedle, homeworkOwnerReplacement);
+else if (!src.includes('if(session.role==="STUDENT"&&action==="declareHomework")')) throw new Error('Homework owner validation point not found');
 
 const homeworkReturnNeedle = `  }
   return json({success:true,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
 };
 
 const overlayHomework=`;
-if (!src.includes(homeworkReturnNeedle)) throw new Error('Homework save return point not found');
 const homeworkReturnReplacement = `  }
   const verifyResults=await env.DB.batch(ids.map((id)=>env.DB.prepare("SELECT student_status,student_completed_date,teacher_status,confirmation_memo FROM v3_homework_overrides WHERE student_id=? AND homework_id=?").bind(byId.get(id),id)));
   for(let index=0;index<ids.length;index++){
@@ -83,21 +82,21 @@ const homeworkReturnReplacement = `  }
     homeworkId:ids[0],
     studentStatus:text(savedRow.student_status)||"UNINPUT",
     studentCompletedDate:text(savedRow.student_completed_date),
-    teacherStatus:text(savedRow.teacher_status),
+    teacherStatus:normalizeTeacherStatus(savedRow.teacher_status),
     confirmationMemo:text(savedRow.confirmation_memo),
   };
   return json({success:true,verified:true,homework,elapsedMs:elapsed(started),source:"D1_V3_ISOLATED"},200,{"x-data-source":"cloudflare-d1-v3-isolated"});
 };
 
 const overlayHomework=`;
-src = src.replace(homeworkReturnNeedle, homeworkReturnReplacement);
+if (src.includes(homeworkReturnNeedle)) src = src.replace(homeworkReturnNeedle, homeworkReturnReplacement);
+else if (!src.includes('HOMEWORK_WRITE_NOT_FOUND') || !src.includes('teacherStatus:normalizeTeacherStatus(savedRow.teacher_status)')) throw new Error('Homework save return point not found');
 
 const overlayNeedle = `const overlayHomework=(value:Row,overrides:Row[])=>{
   const byId=new Map(overrides.map((row)=>[text(row.homework_id),row]));
   const patch=(item:unknown)=>{if(!isRow(item))return item;const o=byId.get(text(item.homeworkId));if(!o)return item;const out:Row={...item};if(o.student_status!=null)out.studentStatus=text(o.student_status);if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);if(o.teacher_status!=null)out.teacherStatus=text(o.teacher_status);if(o.confirmation_memo!=null)out.confirmationMemo=text(o.confirmation_memo);return out;};
   const out:Row={...value};if(Array.isArray(value.homework))out.homework=value.homework.map(patch);if(Array.isArray(value.groups))out.groups=value.groups.map((group)=>isRow(group)?{...group,items:Array.isArray(group.items)?group.items.map(patch):group.items}:group);return out;
 };`;
-if (!src.includes(overlayNeedle)) throw new Error('Homework overlay point not found');
 const overlayReplacement = `const overlayHomework=(value:Row,overrides:Row[])=>{
   const byId=new Map(overrides.map((row)=>[text(row.homework_id),row]));
   const visit=(node:unknown):unknown=>{
@@ -110,14 +109,15 @@ const overlayReplacement = `const overlayHomework=(value:Row,overrides:Row[])=>{
     if(o){
       if(o.student_status!=null)out.studentStatus=text(o.student_status);
       if(o.student_completed_date!=null)out.studentCompletedDate=text(o.student_completed_date);
-      if(o.teacher_status!=null)out.teacherStatus=text(o.teacher_status);
-      if(o.confirmation_memo!=null)out.confirmationMemo=text(o.confirmation_memo);
+      out.teacherStatus=normalizeTeacherStatus(o.teacher_status);
+      out.confirmationMemo=text(o.confirmation_memo);
     }
     return out;
   };
   return visit(value) as Row;
 };`;
-src = src.replace(overlayNeedle, overlayReplacement);
+if (src.includes(overlayNeedle)) src = src.replace(overlayNeedle, overlayReplacement);
+else if (!src.includes('out.teacherStatus=normalizeTeacherStatus(o.teacher_status)')) throw new Error('Homework overlay point not found');
 
 const listReturnNeedle = `  const patched=overlayHomework(value,overrideResult.results.filter(isRow));patched.archivedGroupKeys=archiveResult.results.filter(isRow).map((row)=>text(row.group_key));patched.source="GOOGLE_STRUCTURE_D1_V3_STATE";return json(patched,upstream.status,{"x-data-source":"google-structure+d1-v3-state"});`;
 if (!src.includes(listReturnNeedle)) throw new Error('Homework list return point not found');

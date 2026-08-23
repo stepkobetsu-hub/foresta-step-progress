@@ -5,8 +5,9 @@ type Row = Record<string, unknown>;
 const text = (value: unknown) => String(value ?? "").trim();
 const truthy = (value: unknown) => value === true || value === 1 || text(value).toLowerCase() === "true";
 const normalizeSeries = (value: unknown) => text(value) || "FORESTA_STEP";
-const unitKey = (subject: unknown, series: unknown, unitId: unknown) =>
-  `${text(subject)}|${normalizeSeries(series)}|${text(unitId)}`;
+// unit_id is globally unique. Progress restored from the legacy store may not
+// include a trustworthy series label, so all progress identity uses unit_id.
+const unitKey = (_subject: unknown, _series: unknown, unitId: unknown) => text(unitId);
 const seriesLabel = (series: string) => ({
   FORESTA_GOAL: "フォレスタゴール",
   VOCABULARY: "フォレスタ英単語",
@@ -34,9 +35,6 @@ const progressState = (row: Row | undefined, roundNumber: number) => ({
 
 export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[], homework: Row[], selectable: Row[]) => {
   const summary = buildDashboardSummary(targets, progress, homework);
-  // unit_id is globally unique in the units table. Target inclusion therefore
-  // uses only unit_id; mixing legacy series labels into target identity caused
-  // a saved target to appear restored after reload.
   const targetIds = new Set(targets
     .filter((row) => truthy(row.included))
     .map((row) => text(row.unit_id))
