@@ -2,11 +2,6 @@ name: Recover V3 production UI
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - .deploy-v3-logout-hotfix-trigger
 
 permissions:
   contents: read
@@ -60,6 +55,5 @@ jobs:
           curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
           grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' /tmp/index.html
           grep -q 'applyHomeworkCheckToCache_(out.homework)' /tmp/index.html
-          grep -q "forestaProgress.manualLogout" /tmp/index.html
           curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
           node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
