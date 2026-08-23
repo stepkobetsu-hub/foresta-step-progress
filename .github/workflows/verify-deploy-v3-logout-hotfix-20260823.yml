@@ -52,7 +52,7 @@ jobs:
           node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
           npm run check
           grep -q "localStorage.setItem('forestaProgress.manualLogout','true')" public/index.html
-          grep -q "setLoginType('student');finishAuthResume_();button.disabled=false" public/index.html
+          grep -q "setLoginType('student');if(typeof finishAuthResume_==='function')finishAuthResume_();button.disabled=false" public/index.html
           grep -q "localStorage.removeItem('forestaProgress.manualLogout')" public/index.html
           grep -q 'paintHomeworkOptimistic_(item,homeworkId,type,status)' public/index.html
           grep -q 'applyHomeworkCheckToCache_(out.homework)' public/index.html
@@ -128,7 +128,7 @@ jobs:
           done
           [ "$code" = "200" ]
           grep -q "localStorage.setItem('forestaProgress.manualLogout','true')" /tmp/production.html
-          grep -q "setLoginType('student');finishAuthResume_();button.disabled=false" /tmp/production.html
+          grep -q "setLoginType('student');if(typeof finishAuthResume_==='function')finishAuthResume_();button.disabled=false" /tmp/production.html
           grep -q "localStorage.removeItem('forestaProgress.manualLogout')" /tmp/production.html
           curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
           cat /tmp/health.json
