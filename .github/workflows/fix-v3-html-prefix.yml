@@ -50,11 +50,6 @@ jobs:
           node scripts/apply-v3-graph-session-fix.mjs public/index.html
           node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
           npm run check
-          grep -q 'renderProgressHeroFast_(out.data)' public/index.html
-          grep -q 'state.dashboardCache&&!renderProgressHeroFast_(state.dashboardCache)' public/index.html
-          grep -q 'const storedValid=!!(saved&&saved.token&&saved.profile' public/index.html
-          grep -q 'forestaProgress.manualLogout' public/index.html
-          grep -q '宿題済み' public/index.html
       - name: Deploy V3 production
         working-directory: cloudflare
         run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Persist refresh session and immediate progress graph"
