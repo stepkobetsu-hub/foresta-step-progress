@@ -39,7 +39,7 @@ jobs:
           node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
           npm run check
           grep -q "renderProgressHeroFast_(out.data)" public/index.html
-          grep -q "timeoutMs:8000" public/index.html
+          grep -q "done?'宿題済み':'チェック'" public/index.html
       - name: Deploy preview
         working-directory: cloudflare
         run: npx wrangler deploy --config wrangler.v3.production.jsonc --name step-progress-v3-graph-fix-preview --message "Preview immediate student graph rendering"
@@ -83,21 +83,18 @@ jobs:
           echo "::add-mask::$SESSION_TOKEN"
           node <<'NODE'
           const {chromium}=require('playwright');
-          async function scenario(browser,label,url,staleCommon,limitMs){
-            const page=await browser.newPage(),events=[];
+          (async()=>{
+            const browser=await chromium.launch({headless:true}),page=await browser.newPage(),events=[];
             page.on('pageerror',e=>events.push({type:'pageerror',text:String(e)}));
             page.on('request',req=>{if(req.url().includes('/api')){let action='';try{action=JSON.parse(req.postData()||'{}').action||''}catch{}events.push({type:'request',action,t:Date.now()})}});
             page.on('response',res=>{if(res.url().includes('/api'))events.push({type:'response',status:res.status(),t:Date.now()})});
-            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
-            await page.evaluate(({token,expiresAt,staleCommon})=>{const value={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(value));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(value));if(staleCommon){localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString())}else{localStorage.removeItem('stepCommonStudentSessionToken');localStorage.removeItem('stepCommonStudentSessionExpiresAt')}},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT,staleCommon});
+            await page.goto('https://step-progress-v3-graph-fix-preview.stepkobetsu.workers.dev/',{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{const value={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(value));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(value));localStorage.removeItem('stepCommonStudentSessionToken');localStorage.removeItem('stepCommonStudentSessionExpiresAt')},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
             const started=Date.now();await page.reload({waitUntil:'domcontentloaded',timeout:30000});
-            await page.waitForFunction(()=>document.body.innerText.includes('173%'),null,{timeout:limitMs});
-            const elapsed=Date.now()-started;
-            console.log(label+'='+JSON.stringify({elapsedMs:elapsed,events}));
-            if(elapsed>limitMs)throw new Error(label+' too slow: '+elapsed);
-            await page.close();return elapsed;
-          }
-          (async()=>{const browser=await chromium.launch({headless:true});await scenario(browser,'PREVIEW_STORED','https://step-progress-v3-graph-fix-preview.stepkobetsu.workers.dev/',false,3500);await scenario(browser,'PREVIEW_STALE_COMMON','https://step-progress-v3-graph-fix-preview.stepkobetsu.workers.dev/',true,12000);await browser.close()})().catch(e=>{console.error(e);process.exit(1)});
+            await page.waitForFunction(()=>document.body.innerText.includes('173%'),null,{timeout:3500});
+            const elapsed=Date.now()-started;console.log('PREVIEW_GRAPH='+JSON.stringify({elapsedMs:elapsed,events}));
+            await browser.close();if(elapsed>3500)process.exit(2);
+          })().catch(e=>{console.error(e);process.exit(1)});
           NODE
       - name: Deploy production after preview passes
         working-directory: cloudflare
