@@ -58,16 +58,6 @@ if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard completion 
 if (html.includes(earlyBackgroundNeedle)) throw new Error('old delayed dashboard scheduling still present in student landing path');
 if (html.includes(settledNeedle)) throw new Error('duplicate dashboard request path still present');
 
-// A stale common student token must not discard a still-valid app session. The
-// old code chose the common token first and, if its verification failed the next
-// day, cleared the stored app session too. Fall back to the app session instead.
-const commonSessionPatch = `if(common){\n        try{\n          const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:8000});\n          if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');\n          saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};\n          clearStoredSession_();\n          saveStoredSession_(saved,false);\n        }catch(commonError){\n          clearCommonSession_();\n          saved=readStoredSession_();\n        }\n      }else saved=readStoredSession_();`;
-const commonSessionPattern = /if\(common\)\{\s*const verified=await rpc\(\{action:'getCommonStudentSession',token:common\.token\},\{attempts:1,timeoutMs:30000\}\);\s*if\(!verified\.success\|\|verified\.role!=='STUDENT'\|\|!verified\.profile\)throw new Error\('COMMON_SESSION_INVALID'\);\s*saved=\{token:common\.token,role:'STUDENT',profile:verified\.profile,expiresAt:common\.expiresAt\};\s*clearStoredSession_\(\);\s*saveStoredSession_\(saved,false\);\s*\}else saved=readStoredSession_\(\);/;
-if (commonSessionPattern.test(html)) html = html.replace(commonSessionPattern, commonSessionPatch);
-if (!html.includes("action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:8000}")) throw new Error('common-session timeout patch missing');
-if (!html.includes('catch(commonError)')) throw new Error('common-session fallback catch missing');
-if (!html.includes('clearCommonSession_();\n          saved=readStoredSession_();')) throw new Error('common-session stored-session fallback missing');
-
 // Clear any old persisted view cache after a homework declaration. Older UI
 // revisions vary slightly here, so use a tolerant replacement and do not make
 // deployment depend on the exact one-line formatting.
@@ -89,4 +79,4 @@ if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Er
 if (!html.includes('renderProgressHeroFast_(out.data)')) throw new Error('dashboard response does not paint graph immediately');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; progress hero paints immediately from D1; common-session fallback enabled; autosave progress=300ms target=350ms');
+console.log('Sanitized V3 HTML; progress hero paints immediately from D1; autosave progress=300ms target=350ms');
