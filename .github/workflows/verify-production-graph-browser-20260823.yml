@@ -88,8 +88,8 @@ jobs:
               const value={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};
               sessionStorage.setItem('fsSession',JSON.stringify(value));
               localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(value));
-              localStorage.setItem('stepCommonStudentSessionToken',token);
-              localStorage.setItem('stepCommonStudentSessionExpiresAt',expiresAt);
+              localStorage.removeItem('stepCommonStudentSessionToken');
+              localStorage.removeItem('stepCommonStudentSessionExpiresAt');
             },{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
             await page.reload({waitUntil:'domcontentloaded',timeout:30000});
             let result={ok:false};
@@ -101,7 +101,6 @@ jobs:
             }
             console.log('BROWSER_RESULT='+JSON.stringify(result));
             console.log('BROWSER_EVENTS='+JSON.stringify(events.slice(-80)));
-            await page.screenshot({path:'/tmp/production-1100.png',fullPage:true});
             await browser.close();
             if(!result.ok)process.exit(2);
           })().catch(e=>{console.error(e);process.exit(3)});
