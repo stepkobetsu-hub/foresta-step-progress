@@ -1,0 +1,121 @@
+name: Verify single graph refresh PR 20260823
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.verify-single-graph-refresh-trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LAST_GOOD_UI_URL: https://7b84a8f6-step-progress-api.stepkobetsu.workers.dev/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/homework-status-root-cause
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Build candidate
+        working-directory: cloudflare
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location "$LAST_GOOD_UI_URL" -o public/index.html
+          node scripts/apply-v3-runtime-fastpath.mjs src/v3.ts
+          node scripts/apply-v3-autosave.mjs public/index.html
+          node scripts/apply-v3-homework-display-fix.mjs src/v3.ts public/index.html
+          npm run check
+          grep -q "v3-fast-progress-replace-on-full-render" public/index.html
+          grep -q "renderProgressHeroFast_(out.data)" public/index.html
+          grep -q "const storedValid=!!(saved&&saved.token&&saved.profile" public/index.html
+          grep -q "done?'宿題済み':'チェック'" public/index.html
+      - name: Deploy preview
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --name step-progress-v3-single-graph-preview --message "Preview single graph after fast render"
+      - name: Create temporary D1 session
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="single-graph-1100-$(openssl rand -hex 32)"
+          HASH=$(TOKEN="$TOKEN" node -e "const c=require('crypto');process.stdout.write(c.createHash('sha256').update(process.env.TOKEN).digest('hex'))")
+          EXPIRES=$(date -u -d '+30 minutes' '+%Y-%m-%d %H:%M:%S')
+          cat > /tmp/session.sql <<SQL
+          INSERT INTO v3_sessions(token_hash,user_id,role,profile_json,expires_at,created_at,last_seen_at)
+          VALUES('$HASH','1100','STUDENT','{"studentId":"1100","id":"1100","name":"田中彗翔"}','$EXPIRES',datetime('now'),datetime('now'));
+          SQL
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --file=/tmp/session.sql
+          echo "::add-mask::$TOKEN"
+          echo "SESSION_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "EXPIRES_AT=${EXPIRES/ /T}Z" >> "$GITHUB_ENV"
+      - name: Verify preview
+        working-directory: cloudflare
+        run: |
+          echo "::add-mask::$SESSION_TOKEN"
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          async function verify(url,label){
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{const s={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(s));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(s));localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString())},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            for(let i=1;i<=2;i++){
+              const started=Date.now();
+              await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+              await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:7000});
+              const firstMs=Date.now()-started;
+              await page.waitForTimeout(5000);
+              const result=await page.evaluate(()=>({count:(document.body.innerText.match(/3周合計/g)||[]).length,text:document.body.innerText}));
+              if(result.text.includes('生徒ログイン')&&!result.text.includes('田中彗翔'))throw new Error(label+' returned to login');
+              if(result.count!==1)throw new Error(label+' duplicate graph count='+result.count);
+              console.log(`${label}_REFRESH_${i}_FIRST_MS=${firstMs} GRAPH_COUNT=${result.count}`);
+            }
+            await browser.close();
+          }
+          verify('https://step-progress-v3-single-graph-preview.stepkobetsu.workers.dev/','PREVIEW').catch(e=>{console.error(e);process.exit(1)});
+          NODE
+      - name: Deploy production
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Keep exactly one student graph after fast render"
+      - name: Verify production
+        working-directory: cloudflare
+        run: |
+          echo "::add-mask::$SESSION_TOKEN"
+          sleep 5
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            await page.goto('https://step-progress-api.stepkobetsu.workers.dev/?single-graph='+Date.now(),{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(({token,expiresAt})=>{const s={token,role:'STUDENT',profile:{studentId:'1100',id:'1100',name:'田中彗翔'},expiresAt};sessionStorage.setItem('fsSession',JSON.stringify(s));localStorage.setItem('forestaProgress.rememberedSession',JSON.stringify(s));localStorage.setItem('stepCommonStudentSessionToken','stale-common-token');localStorage.setItem('stepCommonStudentSessionExpiresAt',new Date(Date.now()+3600000).toISOString())},{token:process.env.SESSION_TOKEN,expiresAt:process.env.EXPIRES_AT});
+            for(let i=1;i<=2;i++){
+              const started=Date.now();
+              await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+              await page.waitForFunction(()=>document.body.innerText.includes('173%')&&document.body.innerText.includes('121/70'),null,{timeout:9000});
+              const firstMs=Date.now()-started;
+              await page.waitForTimeout(5000);
+              const result=await page.evaluate(()=>({count:(document.body.innerText.match(/3周合計/g)||[]).length,text:document.body.innerText}));
+              if(result.text.includes('生徒ログイン')&&!result.text.includes('田中彗翔'))throw new Error('production returned to login');
+              if(result.count!==1)throw new Error('production duplicate graph count='+result.count);
+              console.log(`PRODUCTION_REFRESH_${i}_FIRST_MS=${firstMs} GRAPH_COUNT=${result.count}`);
+            }
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
+          cat /tmp/health.json
+          node -e 'const h=require("/tmp/health.json");process.exit(h.ok===true&&h.progressCount===3540&&h.targetCount===6555&&h.homeworkCount===2271?0:1)'
