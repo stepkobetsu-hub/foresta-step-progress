@@ -1,0 +1,74 @@
+name: Diagnose V3 logout production 20260823
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.diagnose-v3-logout-production-trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Compare normal and cache-busted production loads
+        shell: bash
+        run: |
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          async function check(browser,label,url,headers={}){
+            const context=await browser.newContext({extraHTTPHeaders:headers});
+            const page=await context.newPage();
+            const events=[];
+            page.on('pageerror',e=>events.push(String(e?.message||e)));
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await page.evaluate(()=>{
+              localStorage.setItem('forestaProgress.rememberLogin.staff','true');
+              localStorage.setItem('forestaProgress.savedId.staff','diagnostic-teacher');
+              localStorage.setItem('forestaProgress.savedPassword.staff','diagnostic-password');
+              localStorage.setItem('forestaProgress.loginType','staff');
+              localStorage.setItem('forestaProgress.manualLogout','true');
+              sessionStorage.removeItem('fsSession');
+              localStorage.removeItem('forestaProgress.rememberedSession');
+              localStorage.removeItem('stepCommonStudentSessionToken');
+              localStorage.removeItem('stepCommonStudentSessionExpiresAt');
+            });
+            await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+            await page.waitForTimeout(2500);
+            const result=await page.evaluate(()=>({
+              loginHidden:document.getElementById('login')?.classList.contains('hidden')??null,
+              applicationHidden:document.getElementById('application')?.classList.contains('hidden')??null,
+              studentActive:document.getElementById('studentTab')?.classList.contains('active')??null,
+              staffActive:document.getElementById('staffTab')?.classList.contains('active')??null,
+              title:document.getElementById('loginTitle')?.textContent||null,
+              idEmpty:(document.getElementById('loginId')?.value||'')==='',
+              buttonText:document.getElementById('loginButton')?.textContent||null,
+              markerPresent:localStorage.getItem('forestaProgress.manualLogout')==='true',
+              stateLoginType:typeof state==='object'?state.loginType:null,
+              loginInFlight:typeof state==='object'?state.loginInFlight:null
+            }));
+            console.log(label+'='+JSON.stringify({result,errors:events}));
+            await context.close();
+            return result;
+          }
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const normal=await check(browser,'NORMAL','https://step-progress-api.stepkobetsu.workers.dev/');
+            const busted=await check(browser,'CACHE_BUSTED','https://step-progress-api.stepkobetsu.workers.dev/?verify='+Date.now(),{'Cache-Control':'no-cache'});
+            await browser.close();
+            const good=r=>r.loginHidden===false&&r.applicationHidden===true&&r.studentActive===true&&r.title==='生徒ログイン'&&r.idEmpty===true&&r.buttonText==='ログイン'&&r.markerPresent===true;
+            if(!good(busted))process.exit(2);
+            if(!good(normal))process.exit(3);
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
