@@ -25,26 +25,46 @@ if (!html.includes(saveHomeworkNeedle) && !html.includes('dashboard:state.dashbo
 }
 html = html.replace(saveHomeworkNeedle, 'dashboard:state.dashboardCache,homework:null');
 
-// Start the D1 dashboard request immediately. The homework screen can keep its
-// current fast path, but the progress graph no longer waits for that path to
-// finish before the dashboard request begins.
-const landingNeedle = 'let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;';
-const eagerNeedle = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard'):null;";
-if (html.includes(landingNeedle) && !html.includes(eagerNeedle)) {
-  html = html.replace(landingNeedle, `${landingNeedle}\n    ${eagerNeedle}`);
+// Draw the progress hero as soon as D1 returns the dashboard. This is a small
+// partial render that is intentionally independent of homework rendering and
+// the large progress-input DOM. The later full render replaces this mount.
+const renderStudentNeedle = '  async function renderStudent(){';
+const fastHeroHelper = `  function renderProgressHeroFast_(d){\n    if(!d||state.loggingOut)return;\n    const main=$('main');if(!main)return;\n    let mount=main.querySelector('[data-fast-progress-hero]');\n    if(!mount){mount=document.createElement('div');mount.dataset.fastProgressHero='1';const welcome=main.querySelector('.studentWelcome');if(welcome)welcome.after(mount);else main.prepend(mount)}\n    mount.innerHTML=studentProgressHero_(d);\n  }\n`;
+if (html.includes(renderStudentNeedle) && !html.includes('function renderProgressHeroFast_')) {
+  html = html.replace(renderStudentNeedle, fastHeroHelper + renderStudentNeedle);
 }
-if (!html.includes(eagerNeedle)) throw new Error('eager dashboard request patch missing');
+if (!html.includes('function renderProgressHeroFast_')) throw new Error('fast progress hero helper missing');
+
+// Start the D1 dashboard request immediately and paint the graph on resolution,
+// rather than merely starting the network request early and waiting for the
+// homework/full-page path before any graph is drawn.
+const landingNeedle = 'let needsHomework=state.studentLandingPending&&!state.homeworkCache,needsDashboard=!state.dashboardCache;';
+const oldEagerNeedle = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard'):null;";
+const eagerNeedle = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard').then(out=>{if(out?.data){state.dashboardCache=out.data;saveStudentViewCache_();renderProgressHeroFast_(out.data)}return out}):null;";
+if (html.includes(oldEagerNeedle)) html = html.replace(oldEagerNeedle, eagerNeedle);
+else if (html.includes(landingNeedle) && !html.includes(eagerNeedle)) html = html.replace(landingNeedle, `${landingNeedle}\n    ${eagerNeedle}`);
+if (!html.includes(eagerNeedle)) throw new Error('eager dashboard request/paint patch missing');
 
 const earlyBackgroundNeedle = "if(needsDashboard)scheduleBackground_(()=>loadDashboardInBackground_(),0);";
-const earlyBackgroundPatch = "if(eagerDashboardPromise)eagerDashboardPromise.then(out=>{state.dashboardCache=out.data;saveStudentViewCache_();return renderStudent()}).catch(error=>console.error('[dashboard-load-failed] '+String(error?.message||error)));";
+const oldEarlyBackgroundPatch = "if(eagerDashboardPromise)eagerDashboardPromise.then(out=>{state.dashboardCache=out.data;saveStudentViewCache_();return renderStudent()}).catch(error=>console.error('[dashboard-load-failed] '+String(error?.message||error)));";
+const earlyBackgroundPatch = "if(eagerDashboardPromise)eagerDashboardPromise.then(()=>renderStudent()).catch(error=>console.error('[dashboard-load-failed] '+String(error?.message||error)));";
+html = html.replaceAll(oldEarlyBackgroundPatch, earlyBackgroundPatch);
 html = html.replaceAll(earlyBackgroundNeedle, earlyBackgroundPatch);
 
 const settledNeedle = "needsDashboard?call('getStudentDashboard'):Promise.resolve(null)";
 if (html.includes(settledNeedle)) html = html.replace(settledNeedle, 'eagerDashboardPromise||Promise.resolve(null)');
 
-if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard early-render patch missing');
+if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard completion render patch missing');
 if (html.includes(earlyBackgroundNeedle)) throw new Error('old delayed dashboard scheduling still present in student landing path');
 if (html.includes(settledNeedle)) throw new Error('duplicate dashboard request path still present');
+
+// A stale common student token must not discard a still-valid app session. The
+// old code chose the common token first and, if its verification failed the next
+// day, cleared the stored app session too. Fall back to the app session instead.
+const commonSessionNeedle = `      if(common){\n        const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:30000});\n        if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');\n        saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};\n        clearStoredSession_();\n        saveStoredSession_(saved,false);\n      }else saved=readStoredSession_();`;
+const commonSessionPatch = `      if(common){\n        try{\n          const verified=await rpc({action:'getCommonStudentSession',token:common.token},{attempts:1,timeoutMs:8000});\n          if(!verified.success||verified.role!=='STUDENT'||!verified.profile)throw new Error('COMMON_SESSION_INVALID');\n          saved={token:common.token,role:'STUDENT',profile:verified.profile,expiresAt:common.expiresAt};\n          clearStoredSession_();\n          saveStoredSession_(saved,false);\n        }catch(commonError){\n          clearCommonSession_();\n          saved=readStoredSession_();\n        }\n      }else saved=readStoredSession_();`;
+if (html.includes(commonSessionNeedle)) html = html.replace(commonSessionNeedle, commonSessionPatch);
+if (!html.includes("saved=readStoredSession_();\n        }\n      }else saved=readStoredSession_();")) throw new Error('common-session fallback patch missing');
 
 // Clear any old persisted view cache after a homework declaration. Older UI
 // revisions vary slightly here, so use a tolerant replacement and do not make
@@ -64,6 +84,7 @@ if (!html.includes('setTimeout(flushProgressBatch_,300)')) throw new Error('prog
 if (!html.includes('queue.timer=setTimeout(flush,350)')) throw new Error('target debounce patch missing');
 if (!html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCache=null')) throw new Error('stale homework cache restore still enabled');
 if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Error('homework is still persisted in student view cache');
+if (!html.includes('renderProgressHeroFast_(out.data)')) throw new Error('dashboard response does not paint graph immediately');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; dashboard graph request starts immediately; autosave progress=300ms target=350ms');
+console.log('Sanitized V3 HTML; progress hero paints immediately from D1; common-session fallback enabled; autosave progress=300ms target=350ms');
