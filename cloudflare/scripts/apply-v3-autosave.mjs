@@ -65,7 +65,7 @@ const logoutScreenNeedle = "$('application').classList.add('hidden');$('login').
 if (!html.includes(logoutScreenNeedle)) throw new Error('logout screen restore point not found');
 html = html.replace(
   logoutScreenNeedle,
-  "$('application').classList.add('hidden');$('login').classList.remove('hidden');setLoginType('student');finishAuthResume_();button.disabled=false;"
+  "$('application').classList.add('hidden');$('login').classList.remove('hidden');setLoginType('student');if(typeof finishAuthResume_==='function')finishAuthResume_();button.disabled=false;"
 );
 
 const initialLoginNeedle = "let initialLoginType='student';try{const savedType=localStorage.getItem(REMEMBER_KEYS.type);if(!readCommonSession_()&&(savedType==='student'||savedType==='staff'))initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);";
@@ -75,12 +75,20 @@ html = html.replace(
   "let initialLoginType='student';try{const manualLogout=localStorage.getItem('forestaProgress.manualLogout')==='true',savedType=localStorage.getItem(REMEMBER_KEYS.type);if(!manualLogout&&!readCommonSession_()&&(savedType==='student'||savedType==='staff'))initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);"
 );
 
-const autoLoginNeedle = "if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden');finishAuthResume_()}}";
-if (!html.includes(autoLoginNeedle)) throw new Error('remembered auto-login point not found');
-html = html.replace(
-  autoLoginNeedle,
-  "if(!resumed){let manualLogout=false;try{manualLogout=localStorage.getItem('forestaProgress.manualLogout')==='true'}catch(error){}if(manualLogout){clearStoredSession_();clearCommonSession_();setLoginType('student');$('application').classList.add('hidden');$('login').classList.remove('hidden');finishAuthResume_()}else{const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden');finishAuthResume_()}}}"
-);
+const autoLoginPatterns = [
+  "if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden');finishAuthResume_()}}",
+  "if(!resumed){const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden')}}",
+];
+const autoLoginReplacement = "if(!resumed){let manualLogout=false;try{manualLogout=localStorage.getItem('forestaProgress.manualLogout')==='true'}catch(error){}if(manualLogout){clearStoredSession_();clearCommonSession_();setLoginType('student');$('application').classList.add('hidden');$('login').classList.remove('hidden');if(typeof finishAuthResume_==='function')finishAuthResume_()}else{const remembered=readRememberedLogin_(state.loginType);if(remembered){restoreRememberedLogin_(state.loginType);$('loginForm').requestSubmit()}else{$('application').classList.add('hidden');$('login').classList.remove('hidden');if(typeof finishAuthResume_==='function')finishAuthResume_()}}}";
+let autoLoginPatched = false;
+for (const needle of autoLoginPatterns) {
+  if (html.includes(needle)) {
+    html = html.replace(needle, autoLoginReplacement);
+    autoLoginPatched = true;
+    break;
+  }
+}
+if (!autoLoginPatched) throw new Error('remembered auto-login point not found');
 
 if (html === before) throw new Error('V3 autosave/sanitize patch did not match the current UI');
 if (!html.trimStart().toLowerCase().startsWith('<!doctype html>')) throw new Error('V3 HTML still has an unexpected prefix');
@@ -90,8 +98,9 @@ if (!html.includes('queue.timer=setTimeout(flush,350)')) throw new Error('target
 if (!html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCache=null')) throw new Error('stale homework cache restore still enabled');
 if (!html.includes('dashboard:state.dashboardCache,homework:null')) throw new Error('homework is still persisted in student view cache');
 if (!html.includes("localStorage.setItem('forestaProgress.manualLogout','true')")) throw new Error('manual logout marker patch missing');
-if (!html.includes("setLoginType('student');finishAuthResume_();button.disabled=false")) throw new Error('logout does not return to student login');
+if (!html.includes("setLoginType('student');if(typeof finishAuthResume_==='function')finishAuthResume_();button.disabled=false")) throw new Error('logout does not return to student login');
 if (!html.includes("localStorage.removeItem('forestaProgress.manualLogout')")) throw new Error('manual logout marker is not cleared on successful login');
+if (!html.includes("if(manualLogout){clearStoredSession_();clearCommonSession_();setLoginType('student')")) throw new Error('manual logout does not suppress remembered auto-login');
 
 fs.writeFileSync(file, html);
 console.log('Sanitized V3 HTML; autosave progress=300ms target=350ms; stale homework cache disabled; manual logout returns to student login');
