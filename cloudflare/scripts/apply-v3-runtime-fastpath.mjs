@@ -3,6 +3,14 @@ import fs from 'node:fs';
 const file = process.argv[2] || 'src/v3.ts';
 let src = fs.readFileSync(file, 'utf8');
 
+const alreadyApplied = src.includes('CREATE TABLE IF NOT EXISTS v3_homework_items') &&
+  src.includes('generatedHomeworkCount') &&
+  src.includes('mergeHomeworkPayload(value,generatedResult.results.filter(isRow))');
+if (alreadyApplied) {
+  console.log('V3 runtime fast path already applied; generated-homework support preserved');
+  process.exit(0);
+}
+
 const bootstrapMatches = src.match(/await ensureBootstrap\(env\);/g) || [];
 if (bootstrapMatches.length < 7) throw new Error(`Expected V3 bootstrap calls, found ${bootstrapMatches.length}`);
 
