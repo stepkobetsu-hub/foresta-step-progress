@@ -2,10 +2,6 @@ name: Recover V3 production UI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/fix-v3-html-prefix.yml
 
 permissions:
   contents: read
@@ -57,5 +53,13 @@ jobs:
           curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
           grep -q 'renderProgressHeroFast_' /tmp/index.html
           grep -q 'forestaProgress.manualLogout' /tmp/index.html
-          curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
-          node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" && Number(h.generatedHomeworkCount)>0 ? 0 : 1)'
+          for attempt in {1..12}; do
+            curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
+            if node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" && Number(h.generatedHomeworkCount)>0 ? 0 : 1)'; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          cat /tmp/health.json
+          exit 1
