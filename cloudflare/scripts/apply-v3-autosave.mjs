@@ -11,12 +11,9 @@ html = html
   .replaceAll("status.textContent='変更あり'", "status.textContent='自動保存待ち…'")
   .replaceAll("setGlobalSave_('保存する','pending')", "setGlobalSave_('自動保存待ち…','pending')");
 
-// Hide the login pane before body paint whenever this device has a viable
-// resume path. An explicit logout always wins, even if staff credentials are
-// remembered on the device.
 const resumePrehideMarker = 'v3-resume-prehide';
 if (!html.includes(resumePrehideMarker)) {
-  const resumePrehide = `<style id="v3-auth-resume-hide">html.auth-resume-pending #login{visibility:hidden!important}</style>\n<script id="${resumePrehideMarker}">\ntry{\n  const now=Date.now();\n  const explicitLogout=localStorage.getItem('forestaProgress.explicitLogout')==='1';\n  let stored=null;\n  const raw=sessionStorage.getItem('fsSession')||localStorage.getItem('forestaProgress.rememberedSession')||'';\n  try{stored=raw?JSON.parse(raw):null}catch(error){}\n  const storedValid=!!(stored&&stored.token&&stored.profile&&(!stored.expiresAt||new Date(stored.expiresAt).getTime()>now));\n  const commonExpires=new Date(localStorage.getItem('stepCommonStudentSessionExpiresAt')||'').getTime();\n  const commonValid=!!localStorage.getItem('stepCommonStudentSessionToken')&&commonExpires>now;\n  const rememberedStudent=localStorage.getItem('forestaProgress.rememberLogin.student')==='true'\n    && !!localStorage.getItem('forestaProgress.savedId.student')\n    && !!localStorage.getItem('forestaProgress.savedPassword.student');\n  const rememberedStaff=localStorage.getItem('forestaProgress.rememberLogin.staff')==='true'\n    && !!localStorage.getItem('forestaProgress.savedId.staff')\n    && !!localStorage.getItem('forestaProgress.savedPassword.staff');\n  if(explicitLogout)document.documentElement.classList.remove('auth-resume-pending');\n  else if(storedValid||commonValid||rememberedStudent||rememberedStaff)document.documentElement.classList.add('auth-resume-pending');\n}catch(error){}\n</script>\n`;
+  const resumePrehide = `<style id="v3-auth-resume-hide">html.auth-resume-pending #login{visibility:hidden!important}</style>\n<script id="${resumePrehideMarker}">\ntry{\n  const now=Date.now();\n  const explicitLogout=localStorage.getItem('forestaProgress.explicitLogout')==='1';\n  let stored=null;\n  const raw=sessionStorage.getItem('fsSession')||localStorage.getItem('forestaProgress.rememberedSession')||'';\n  try{stored=raw?JSON.parse(raw):null}catch(error){}\n  const storedValid=!!(stored&&stored.token&&stored.profile&&(!stored.expiresAt||new Date(stored.expiresAt).getTime()>now));\n  const commonExpires=new Date(localStorage.getItem('stepCommonStudentSessionExpiresAt')||'').getTime();\n  const commonValid=!!localStorage.getItem('stepCommonStudentSessionToken')&&commonExpires>now;\n  const rememberedStudent=localStorage.getItem('forestaProgress.rememberLogin.student')==='true'&&!!localStorage.getItem('forestaProgress.savedId.student')&&!!localStorage.getItem('forestaProgress.savedPassword.student');\n  const rememberedStaff=localStorage.getItem('forestaProgress.rememberLogin.staff')==='true'&&!!localStorage.getItem('forestaProgress.savedId.staff')&&!!localStorage.getItem('forestaProgress.savedPassword.staff');\n  if(explicitLogout)document.documentElement.classList.remove('auth-resume-pending');\n  else if(storedValid||commonValid||rememberedStudent||rememberedStaff)document.documentElement.classList.add('auth-resume-pending');\n}catch(error){}\n</script>\n`;
   if (!html.includes('</head>')) throw new Error('head end not found for auth resume prehide');
   html = html.replace('</head>', resumePrehide + '</head>');
 }
@@ -25,7 +22,6 @@ if (!html.includes(resumePrehideMarker) || !html.includes('v3-auth-resume-hide')
 const loadHomeworkNeedle = 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=cached.homework||null';
 if (!html.includes(loadHomeworkNeedle) && !html.includes('state.dashboardCache=cached.dashboard||null;state.homeworkCache=null')) throw new Error('student homework cache load point not found');
 html = html.replace(loadHomeworkNeedle, 'state.dashboardCache=cached.dashboard||null;state.homeworkCache=null');
-
 const saveHomeworkNeedle = 'dashboard:state.dashboardCache,homework:state.homeworkCache';
 if (!html.includes(saveHomeworkNeedle) && !html.includes('dashboard:state.dashboardCache,homework:null')) throw new Error('student homework cache save point not found');
 html = html.replace(saveHomeworkNeedle, 'dashboard:state.dashboardCache,homework:null');
@@ -46,7 +42,6 @@ const landingPatched = `${landingNeedle}\n    if(state.dashboardCache&&!renderPr
 if (html.includes(oldLandingCached)) html = html.replace(oldLandingCached, landingPatched);
 else if (html.includes(landingNeedle) && !html.includes('state.dashboardCache&&!renderProgressHeroFast_')) html = html.replace(landingNeedle, landingPatched);
 if (!html.includes('state.dashboardCache&&!renderProgressHeroFast_(state.dashboardCache)')) throw new Error('invalid cached dashboard recovery patch missing');
-
 const conditionalEager = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard').then(out=>{if(out?.data){state.dashboardCache=out.data;saveStudentViewCache_();renderProgressHeroFast_(out.data)}return out}):null;";
 const veryOldEager = "const eagerDashboardPromise=needsDashboard?call('getStudentDashboard'):null;";
 const eagerNeedle = "const eagerDashboardPromise=call('getStudentDashboard').then(out=>{if(out?.data){state.dashboardCache=out.data;saveStudentViewCache_();renderProgressHeroFast_(out.data)}return out});";
@@ -54,13 +49,11 @@ if (html.includes(conditionalEager)) html = html.replace(conditionalEager, eager
 else if (html.includes(veryOldEager)) html = html.replace(veryOldEager, eagerNeedle);
 else if (html.includes(landingPatched) && !html.includes(eagerNeedle)) html = html.replace(landingPatched, `${landingPatched}\n    ${eagerNeedle}`);
 if (!html.includes(eagerNeedle)) throw new Error('always-revalidate dashboard request patch missing');
-
 const earlyBackgroundNeedle = "if(needsDashboard)scheduleBackground_(()=>loadDashboardInBackground_(),0);";
 const oldEarlyBackgroundPatch = "if(eagerDashboardPromise)eagerDashboardPromise.then(out=>{state.dashboardCache=out.data;saveStudentViewCache_();return renderStudent()}).catch(error=>console.error('[dashboard-load-failed] '+String(error?.message||error)));";
 const earlyBackgroundPatch = "if(eagerDashboardPromise)eagerDashboardPromise.then(()=>renderStudent()).catch(error=>console.error('[dashboard-load-failed] '+String(error?.message||error)));";
 html = html.replaceAll(oldEarlyBackgroundPatch, earlyBackgroundPatch);
 html = html.replaceAll(earlyBackgroundNeedle, earlyBackgroundPatch);
-
 const settledNeedle = "needsDashboard?call('getStudentDashboard'):Promise.resolve(null)";
 if (html.includes(settledNeedle)) html = html.replace(settledNeedle, 'eagerDashboardPromise||Promise.resolve(null)');
 if (!html.includes(earlyBackgroundPatch)) throw new Error('dashboard completion render patch missing');
@@ -73,8 +66,6 @@ if (resumePattern.test(html)) html = html.replace(resumePattern, resumePatch);
 if (!html.includes('const storedValid=!!(saved&&saved.token&&saved.profile')) throw new Error('stored-session-first refresh patch missing');
 if (!html.includes("if(!storedValid&&common){")) throw new Error('common session is still preferred over valid stored session');
 
-// Explicit logout marker. Keep saved IDs/passwords, but never auto-login them
-// immediately after the user explicitly logs out.
 const explicitLogoutMarker = 'v3-explicit-logout';
 if (!html.includes(explicitLogoutMarker)) {
   const persistedNeedle = "  const PERSISTED_SESSION_KEY='forestaProgress.rememberedSession';";
@@ -83,33 +74,34 @@ if (!html.includes(explicitLogoutMarker)) {
   html = html.replace(persistedNeedle, helpers + persistedNeedle);
 }
 if (!html.includes("const EXPLICIT_LOGOUT_KEY='forestaProgress.explicitLogout'")) throw new Error('explicit logout helpers missing');
-
-// Do not auto-submit remembered credentials after an explicit logout.
 const startupRememberedNeedle = "if(!resumed){const remembered=readRememberedLogin_(state.loginType);";
 const startupRememberedPatch = "if(!resumed){const remembered=hasExplicitLogout_()?null:readRememberedLogin_(state.loginType);";
 if (html.includes(startupRememberedNeedle)) html = html.replace(startupRememberedNeedle, startupRememberedPatch);
 if (!html.includes(startupRememberedPatch)) throw new Error('explicit logout auto-login suppression missing');
 
-// Any deliberate login attempt exits explicit-logout mode. Match whitespace
-// tolerantly because the legacy production HTML has changed formatting before.
+// Explicit logout also forces the student tab after a reload, despite saved
+// staff credentials being retained for later manual use.
+const initialTypePattern = /let initialLoginType='student';try\{const savedType=localStorage\.getItem\(REMEMBER_KEYS\.type\);if\(!readCommonSession_\(\)&&\(savedType==='student'\|\|savedType==='staff'\)\)initialLoginType=savedType\}catch\(error\)\{\}setLoginType\(initialLoginType\);/;
+const initialTypePatch = "let initialLoginType='student';try{const savedType=localStorage.getItem(REMEMBER_KEYS.type);if(!hasExplicitLogout_()&&!readCommonSession_()&&(savedType==='student'||savedType==='staff'))initialLoginType=savedType}catch(error){}setLoginType(initialLoginType);";
+if (initialTypePattern.test(html)) html = html.replace(initialTypePattern, initialTypePatch);
+if (!html.includes("if(!hasExplicitLogout_()&&!readCommonSession_()")) throw new Error('explicit logout does not force student login tab on reload');
+
 const loginSubmitPattern = /\$\('loginForm'\)\.onsubmit=async event=>\{\s*event\.preventDefault\(\);if\(state\.loginInFlight\)return;/;
 const loginSubmitPatch = "$('loginForm').onsubmit=async event=>{\n    event.preventDefault();if(state.loginInFlight)return;setExplicitLogout_(false);";
 if (loginSubmitPattern.test(html)) html = html.replace(loginSubmitPattern, loginSubmitPatch);
 if (!html.includes('setExplicitLogout_(false);')) throw new Error('manual login does not clear explicit logout marker');
 
-// The logout button must immediately leave the application shell and show the
-// student login screen. Network logout is best-effort and must never block UI.
+// Visual logout is deliberately FIRST. Cleanup/network work can fail without
+// ever leaving the user on a blank application shell.
 const hardLogoutMarker = 'v3-hard-logout-to-student-login';
 if (!html.includes(hardLogoutMarker)) {
   const startupNeedle = '  (async()=>{';
   if (!html.includes(startupNeedle)) throw new Error('startup IIFE patch point missing for hard logout');
-  const hardLogout = `  // ${hardLogoutMarker}\n  async function forceLogoutToStudentLogin_(){\n    if(state.loggingOut)return;\n    const token=state.token;\n    state.loggingOut=true;state.lifecycleId+=1;\n    cancelPendingWork_();abortPendingReads_();\n    setExplicitLogout_(true);clearStoredSession_();clearCommonSession_();\n    state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;state.vocabularyCache=null;state.studentPage='homework';state.studentLandingPending=true;state.homeworkStudentId='';state.adminDetail='';state.loginInFlight=false;\n    document.querySelectorAll('.logoutConfirm').forEach(node=>node.remove());\n    finishAuthResume_();\n    $('who').textContent='';$('main').innerHTML='';\n    $('application').classList.add('hidden');\n    $('login').classList.remove('hidden');$('login').style.visibility='visible';\n    setLoginType('student');$('loginError').textContent='';$('loginStatus').textContent='';\n    if(token)rpc({action:'logout',token},{attempts:1,timeoutMs:3000,allowDuringLogout:true}).catch(()=>{});\n    state.loggingOut=false;\n  }\n  $('logout').addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();forceLogoutToStudentLogin_()},true);\n`;
+  const hardLogout = `  // ${hardLogoutMarker}\n  function forceLogoutToStudentLogin_(){\n    if(state.loggingOut)return;\n    const token=state.token;\n    try{setExplicitLogout_(true)}catch(error){}\n    try{\n      document.documentElement.classList.remove('auth-resume-pending');\n      const app=$('application'),login=$('login'),studentTab=$('studentTab'),staffTab=$('staffTab');\n      if(app)app.classList.add('hidden');\n      if(login){login.classList.remove('hidden');login.style.visibility='visible'}\n      if(studentTab)studentTab.classList.add('active');if(staffTab)staffTab.classList.remove('active');\n      if($('loginTitle'))$('loginTitle').textContent='生徒ログイン';if($('idLabel'))$('idLabel').textContent='生徒番号';\n      if($('rememberBlock'))$('rememberBlock').classList.add('hidden');if($('loginError'))$('loginError').textContent='';if($('loginStatus'))$('loginStatus').textContent='';\n      if($('who'))$('who').textContent='';if($('main'))$('main').innerHTML='';\n    }catch(error){console.error('[logout-ui] '+String(error?.message||error))}\n    state.loggingOut=true;state.lifecycleId+=1;\n    try{cancelPendingWork_();abortPendingReads_()}catch(error){}\n    try{clearStoredSession_();clearCommonSession_()}catch(error){}\n    state.token='';state.role='';state.profile=null;state.dashboardCache=null;state.homeworkCache=null;state.vocabularyCache=null;state.studentPage='homework';state.studentLandingPending=true;state.homeworkStudentId='';state.adminDetail='';state.loginInFlight=false;state.loginType='student';\n    try{document.querySelectorAll('.logoutConfirm').forEach(node=>node.remove())}catch(error){}\n    if(token)rpc({action:'logout',token},{attempts:1,timeoutMs:3000,allowDuringLogout:true}).catch(()=>{});\n    state.loggingOut=false;\n  }\n  $('logout').addEventListener('click',event=>{event.preventDefault();event.stopImmediatePropagation();forceLogoutToStudentLogin_()},true);\n`;
   html = html.replace(startupNeedle, hardLogout + startupNeedle);
 }
-if (!html.includes(hardLogoutMarker) || !html.includes("$('application').classList.add('hidden')") || !html.includes("setLoginType('student')")) throw new Error('hard logout UI switch missing');
+if (!html.includes(hardLogoutMarker) || !html.includes("if(app)app.classList.add('hidden')") || !html.includes("$('loginTitle').textContent='生徒ログイン'")) throw new Error('hard logout UI-first switch missing');
 
-// Homework rendering can replace the shell after the progress hero already
-// appeared. Restore the cached hero after every homework renderer completes.
 const homeworkHeroMarker = 'v3-homework-preserve-progress-hero';
 if (!html.includes(homeworkHeroMarker)) {
   const teacherNeedle = '  async function renderTeacher(){';
@@ -118,10 +110,6 @@ if (!html.includes(homeworkHeroMarker)) {
   html = html.replace(teacherNeedle, wrapper + teacherNeedle);
 }
 if (!html.includes(homeworkHeroMarker)) throw new Error('homework graph preservation patch missing');
-
-// The fast hero is only a placeholder while the normal student render is being
-// prepared. Once the normal render finishes it already contains the same graph,
-// so remove the temporary mount to prevent two identical graphs remaining.
 const singleHeroMarker = 'v3-fast-progress-replace-on-full-render';
 if (!html.includes(singleHeroMarker)) {
   const teacherNeedle = '  async function renderTeacher(){';
@@ -152,4 +140,4 @@ if (!html.includes(singleHeroMarker)) throw new Error('single progress hero repl
 if (!html.includes(hardLogoutMarker)) throw new Error('hard logout patch missing');
 
 fs.writeFileSync(file, html);
-console.log('Sanitized V3 HTML; teacher logout always returns to student login; fast graph and session-resume protections retained');
+console.log('Sanitized V3 HTML; logout paints student login before cleanup; fast graph and resume protections retained');
