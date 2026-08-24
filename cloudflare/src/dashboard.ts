@@ -32,7 +32,7 @@ const progressState = (row: Row | undefined, roundNumber: number) => ({
   tryCompletedAt: "",
 });
 
-export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[], homework: Row[], selectable: Row[]) => {
+export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[], homework: Row[], selectable: Row[], generatedHomework: Row[] = []) => {
   const summary = buildDashboardSummary(targets, progress, homework);
   // unit_id is globally unique in the units table. Target inclusion therefore
   // uses only unit_id; mixing legacy series labels into target identity caused
@@ -41,16 +41,13 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
     .filter((row) => truthy(row.included))
     .map((row) => text(row.unit_id))
     .filter(Boolean));
-  const progressByKey = new Map(progress.map((row) => [
-    `${unitKey(row.subject, row.series, row.unit_id)}:${Number(row.round) || 1}`,
-    row,
-  ]));
+  const progressByKey = new Map(progress.map((row) => [`${text(row.unit_id)}:${Number(row.round) || 1}`, row]));
   const mapUnit = (unit: Row) => {
     const unitId = text(unit.unit_id);
     const series = normalizeSeries(unit.series);
     const subject = text(unit.subject);
     const key = unitKey(subject, series, unitId);
-    const rounds = [1, 2, 3].map((round) => progressState(progressByKey.get(`${key}:${round}`), round));
+    const rounds = [1, 2, 3].map((round) => progressState(progressByKey.get(`${unitId}:${round}`), round));
     return {
       unitId,
       subject,
@@ -72,6 +69,7 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
   const newest = progress.map((row) => text(row.updated_at)).filter(Boolean).sort().pop() || "";
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
   const todayProgress = progress.filter((row) => text(row.learning_date).slice(0, 10) === today);
+  const todayHomework = generatedHomework.filter((row) => text(row.assigned_date || row.assignedDate).slice(0, 10) === today);
 
   return {
     profile: {
@@ -108,8 +106,8 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
       learnedUnitCount: new Set(todayProgress.map((row) =>
         `${unitKey(row.subject, row.series, row.unit_id)}:${Number(row.round) || 1}`)).size,
       tryCompletedCount: todayProgress.filter((row) => truthy(row.try_completed)).length,
-      homeworkUnitCount: 0,
-      homeworkItemCount: 0,
+      homeworkUnitCount: new Set(todayHomework.map((row) => `${text(row.unit_id || row.unitId)}:${Number(row.round_number || row.roundNumber) || 1}`)).size,
+      homeworkItemCount: todayHomework.length,
       materials: [],
       subjects: [],
     },
