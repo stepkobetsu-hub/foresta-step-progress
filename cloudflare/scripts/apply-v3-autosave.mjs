@@ -90,11 +90,12 @@ const startupRememberedPatch = "if(!resumed){const remembered=hasExplicitLogout_
 if (html.includes(startupRememberedNeedle)) html = html.replace(startupRememberedNeedle, startupRememberedPatch);
 if (!html.includes(startupRememberedPatch)) throw new Error('explicit logout auto-login suppression missing');
 
-// Any deliberate login attempt exits explicit-logout mode.
-const loginSubmitNeedle = "$('loginForm').onsubmit=async event=>{\n    event.preventDefault();if(state.loginInFlight)return;";
+// Any deliberate login attempt exits explicit-logout mode. Match whitespace
+// tolerantly because the legacy production HTML has changed formatting before.
+const loginSubmitPattern = /\$\('loginForm'\)\.onsubmit=async event=>\{\s*event\.preventDefault\(\);if\(state\.loginInFlight\)return;/;
 const loginSubmitPatch = "$('loginForm').onsubmit=async event=>{\n    event.preventDefault();if(state.loginInFlight)return;setExplicitLogout_(false);";
-if (html.includes(loginSubmitNeedle)) html = html.replace(loginSubmitNeedle, loginSubmitPatch);
-if (!html.includes("if(state.loginInFlight)return;setExplicitLogout_(false);")) throw new Error('manual login does not clear explicit logout marker');
+if (loginSubmitPattern.test(html)) html = html.replace(loginSubmitPattern, loginSubmitPatch);
+if (!html.includes('setExplicitLogout_(false);')) throw new Error('manual login does not clear explicit logout marker');
 
 // The logout button must immediately leave the application shell and show the
 // student login screen. Network logout is best-effort and must never block UI.
