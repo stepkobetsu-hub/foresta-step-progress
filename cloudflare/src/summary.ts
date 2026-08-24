@@ -12,7 +12,9 @@ const percent = (completedCount: number, targetCount: number) => targetCount
   : 0;
 
 const unitIdOfTarget = (row: Row) => text(row.unit_id || row.target_start);
-const unitKey = (row: Row) => `${text(row.subject)}|${normalizeSeries(row.series)}|${text(row.unit_id || row.target_start)}`;
+// unit_id is globally unique in D1; it is the stable identity even when older
+// progress rows do not carry subject/series metadata.
+const unitKey = (row: Row) => text(row.unit_id || row.target_start);
 const isIncludedTarget = (row: Row) => truthy(row.included);
 const unitHasLct = (row: Row) => normalizeSeries(row.series) === "FORESTA_STEP" || truthy(row.has_lct);
 const isActiveHomework = (row: Row) => !truthy(row.is_archived) && !text(row.archived_at);
