@@ -2,6 +2,10 @@ name: Recover V3 production UI
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-v3-html-prefix.yml
 
 permissions:
   contents: read
@@ -45,7 +49,7 @@ jobs:
           npm run check
       - name: Deploy V3 production
         working-directory: cloudflare
-        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Recover V3 UI with persistent graph/session fixes"
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Generate homework from saved lesson progress"
       - name: Verify production UI and health
         shell: bash
         run: |
@@ -54,4 +58,4 @@ jobs:
           grep -q 'renderProgressHeroFast_' /tmp/index.html
           grep -q 'forestaProgress.manualLogout' /tmp/index.html
           curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health | tee /tmp/health.json
-          node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" ? 0 : 1)'
+          node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" && Number(h.generatedHomeworkCount)>0 ? 0 : 1)'
