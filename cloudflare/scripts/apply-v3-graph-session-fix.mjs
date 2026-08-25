@@ -12,7 +12,7 @@ if (!html.includes(resumePrehideMarker)) {
 }
 
 const renderStudentNeedle = '  async function renderStudent(){';
-const fastHeroHelper = `  function renderProgressHeroFast_(d){\n    if(!d||state.loggingOut)return false;\n    const main=$('main');if(!main)return false;\n    let mount=main.querySelector('[data-fast-progress-hero]');\n    const progressCount=(main.textContent.match(/全体進捗/g)||[]).length;\n    if(mount&&progressCount>1){mount.remove();return true}\n    if(!mount&&progressCount>0)return true;\n    if(!mount){mount=document.createElement('div');mount.dataset.fastProgressHero='1';const welcome=main.querySelector('.studentWelcome');if(welcome)welcome.after(mount);else main.prepend(mount)}\n    try{mount.innerHTML=studentProgressHero_(d);return true}catch(error){console.warn('[dashboard-cache-invalid] '+String(error?.message||error));mount.remove();return false}\n  }\n`;
+const fastHeroHelper = `  function renderProgressHeroFast_(d){\n    if(!d||state.loggingOut)return false;\n    const main=$('main');if(!main)return false;\n    let mount=main.querySelector('[data-fast-progress-hero]');\n    const heroes=Array.from(main.querySelectorAll('.progressHero'));\n    if(mount){\n      const canonicalHero=heroes.find(hero=>!mount.contains(hero));\n      if(canonicalHero){mount.remove();return true}\n    }\n    if(!mount&&heroes.length){\n      heroes.slice(1).forEach(hero=>hero.remove());\n      return true;\n    }\n    if(!mount){mount=document.createElement('div');mount.dataset.fastProgressHero='1';const welcome=main.querySelector('.studentWelcome');if(welcome)welcome.after(mount);else main.prepend(mount)}\n    try{mount.innerHTML=studentProgressHero_(d);return true}catch(error){console.warn('[dashboard-cache-invalid] '+String(error?.message||error));mount.remove();return false}\n  }\n`;
 if (html.includes(renderStudentNeedle) && !html.includes('function renderProgressHeroFast_')) {
   html = html.replace(renderStudentNeedle, fastHeroHelper + renderStudentNeedle);
 }
@@ -60,7 +60,7 @@ if (!html.includes(homeworkHeroMarker)) {
 if (html === before) throw new Error('graph/session hotfix did not match current UI');
 if (!html.includes(resumePrehideMarker)) throw new Error('resume prehide missing');
 if (!html.includes("const eagerDashboardPromise=call('getStudentDashboard')")) throw new Error('dashboard is not revalidated on app open');
-if (!html.includes('progressCount>1')) throw new Error('duplicate progress hero cleanup missing');
+if (!html.includes("main.querySelectorAll('.progressHero')")) throw new Error('DOM-based duplicate progress hero cleanup missing');
 if (!html.includes('await renderStudent();if(state.dashboardCache)renderProgressHeroFast_')) throw new Error('full-render dedupe call missing');
 if (!html.includes('const storedValid=!!(saved&&saved.token&&saved.profile')) throw new Error('valid stored session is not preferred');
 if (!html.includes(homeworkHeroMarker)) throw new Error('homework render does not preserve graph');
