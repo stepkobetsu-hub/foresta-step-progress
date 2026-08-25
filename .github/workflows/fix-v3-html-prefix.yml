@@ -64,7 +64,7 @@ jobs:
           grep -q 'forestaProgress.manualLogout' /tmp/index.html
           for attempt in {1..12}; do
             curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
-            if node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" && Number(h.generatedHomeworkCount)>0 ? 0 : 1)'; then
+            if node -e 'const h=require("/tmp/health.json"); process.exit(h.ok===true && h.mode==="d1-isolated-autosave" && Number(h.generatedHomeworkCount)>0 && Number(h.goalJapaneseUnitCount)===57 ? 0 : 1)'; then
               cat /tmp/health.json
               exit 0
             fi
