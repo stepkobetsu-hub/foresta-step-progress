@@ -1,4 +1,5 @@
 import { buildV83Dashboard } from "./dashboard.ts";
+import { GOAL_JAPANESE_MATERIAL, GOAL_JAPANESE_UNITS } from "./goal-japanese.ts";
 
 type Row = Record<string, unknown>;
 type V3Env = Env & { GOOGLE_API_URL: string };
@@ -165,9 +166,48 @@ const ensureSchema = (env: V3Env) => {
 };
 
 let bootstrapReady: Promise<void> | null = null;
+const GOAL_JAPANESE_CATALOG_KEY = "goal_japanese_catalog_20260825_v1";
+
+const ensureGoalJapaneseCatalog = async (env: V3Env) => {
+  const existing = await env.DB.prepare(`SELECT COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series=? AND u.subject=? AND u.grade=? AND m.active=1`)
+    .bind(GOAL_JAPANESE_MATERIAL.series, GOAL_JAPANESE_MATERIAL.subject, GOAL_JAPANESE_MATERIAL.grade)
+    .first<{ count: number }>();
+  if (Number(existing?.count || 0) >= GOAL_JAPANESE_UNITS.length) return;
+
+  const material = env.DB.prepare(`INSERT INTO materials(material_id,series,subject,grade,title,has_lct,active,updated_at,version)
+    VALUES(?,?,?,?,?,?,1,datetime('now'),1)
+    ON CONFLICT(material_id) DO UPDATE SET series=excluded.series,subject=excluded.subject,grade=excluded.grade,title=excluded.title,has_lct=excluded.has_lct,active=1,updated_at=datetime('now'),version=materials.version+1`)
+    .bind(
+      GOAL_JAPANESE_MATERIAL.materialId,
+      GOAL_JAPANESE_MATERIAL.series,
+      GOAL_JAPANESE_MATERIAL.subject,
+      GOAL_JAPANESE_MATERIAL.grade,
+      GOAL_JAPANESE_MATERIAL.title,
+      GOAL_JAPANESE_MATERIAL.hasLct ? 1 : 0,
+    );
+  const units = GOAL_JAPANESE_UNITS.map((unit) => env.DB.prepare(`INSERT INTO units(unit_id,material_id,subject,grade,unit_order,unit_type,title,has_lct,updated_at,version)
+    VALUES(?,?,?,?,?,?,?,?,datetime('now'),1)
+    ON CONFLICT(unit_id) DO UPDATE SET material_id=excluded.material_id,subject=excluded.subject,grade=excluded.grade,unit_order=excluded.unit_order,unit_type=excluded.unit_type,title=excluded.title,has_lct=excluded.has_lct,updated_at=datetime('now'),version=units.version+1`)
+    .bind(
+      unit.unitId,
+      GOAL_JAPANESE_MATERIAL.materialId,
+      GOAL_JAPANESE_MATERIAL.subject,
+      GOAL_JAPANESE_MATERIAL.grade,
+      unit.unitOrder,
+      unit.unitType,
+      unit.title,
+      unit.hasLct ? 1 : 0,
+    ));
+  await env.DB.batch([material, ...units]);
+  await env.DB.prepare(`INSERT INTO v3_meta(key,value,updated_at) VALUES(?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')`)
+    .bind(GOAL_JAPANESE_CATALOG_KEY, String(GOAL_JAPANESE_UNITS.length))
+    .run();
+};
+
 const ensureBootstrap = (env: V3Env) => {
   if (!bootstrapReady) bootstrapReady = (async () => {
     await ensureSchema(env);
+    await ensureGoalJapaneseCatalog(env);
     const done = await env.DB.prepare("SELECT value FROM v3_meta WHERE key='bootstrap_complete'").first<{ value: string }>();
     if (done?.value !== "1") await env.DB.batch([
       env.DB.prepare(`INSERT OR IGNORE INTO v3_progress_records(record_id,student_id,material_id,subject,grade,unit_id,round,point_confirmed,warmup_confirmed,try_completed,memorization_completed,exercise_completed,lct_result,learning_date,updated_at,updated_by,version,request_id)
