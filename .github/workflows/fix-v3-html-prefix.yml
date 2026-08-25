@@ -56,6 +56,11 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/ -o /tmp/index.html
           grep -q 'renderProgressHeroFast_' /tmp/index.html
+          grep -q "main.querySelectorAll('.progressHero')" /tmp/index.html
+          if grep -q 'main.textContent.match(/全体進捗/g)' /tmp/index.html; then
+            echo 'Old text-based graph dedupe is still present' >&2
+            exit 1
+          fi
           grep -q 'forestaProgress.manualLogout' /tmp/index.html
           for attempt in {1..12}; do
             curl --fail --silent --show-error -H 'Cache-Control: no-cache' https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json
