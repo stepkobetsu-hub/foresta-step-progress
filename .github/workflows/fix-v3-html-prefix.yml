@@ -2,6 +2,10 @@ name: Recover V3 production UI
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .deploy-restored-progress-trigger
 
 permissions:
   contents: read
