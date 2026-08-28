@@ -1,0 +1,95 @@
+name: Fix auth resume blank screen
+
+on:
+  push:
+    branches:
+      - agent/step-progress-v3-implementation
+    paths:
+      - .github/workflows/fix-auth-resume-blank.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-auth-resume-blank-production
+  cancel-in-progress: false
+
+jobs:
+  patch-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Check out V3 implementation
+        uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+
+      - name: Prevent saved-session blank screen
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('cloudflare/public/index.html')
+          text = path.read_text(encoding='utf-8')
+          bad = '    html.auth-resume-pending #login{visibility:hidden}\n'
+          if bad not in text:
+              raise SystemExit('auth-resume hidden-login rule not found')
+          text = text.replace(bad, '', 1)
+          if not text.startswith('<!doctype html>'):
+              raise SystemExit('index.html no longer starts with doctype')
+          if text.startswith('Warning:') or 'Warning: truncated output' in text[:300]:
+              raise SystemExit('connector warning prefix detected')
+          path.write_text(text, encoding='utf-8')
+          PY
+          ! grep -q 'html.auth-resume-pending #login{visibility:hidden}' cloudflare/public/index.html
+          grep -q 'class="homeDoneCheckbox"' cloudflare/public/index.html
+
+      - name: Commit source patch and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-auth-resume-blank.yml
+          git config user.name "stepkobetsu-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add cloudflare/public/index.html .github/workflows/fix-auth-resume-blank.yml
+          git diff --cached --check
+          git commit -m "Prevent blank screen during saved-session resume"
+          git push origin HEAD:agent/step-progress-v3-implementation
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Verify TypeScript
+        working-directory: cloudflare
+        run: npm run check
+
+      - name: Deploy production Worker
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Prevent blank saved-session resume screen"
+
+      - name: Verify production UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            curl --fail --silent --show-error -H 'Cache-Control: no-cache' "https://step-progress-api.stepkobetsu.workers.dev/?v=${GITHUB_SHA}-${attempt}" -o /tmp/index.html
+            if head -n 1 /tmp/index.html | grep -qi '<!doctype html>' \
+              && ! grep -q 'Warning: truncated output' /tmp/index.html \
+              && ! grep -q 'html.auth-resume-pending #login{visibility:hidden}' /tmp/index.html \
+              && grep -q 'class="homeDoneCheckbox"' /tmp/index.html; then
+              echo 'production UI is visible-safe and homework checkbox remains live'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'production UI verification failed' >&2
+          exit 1
