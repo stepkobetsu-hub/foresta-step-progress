@@ -1,0 +1,54 @@
+name: Verify Goal catalog 20260905
+
+on:
+  push:
+    branches:
+      - codex/fix-goal-targets-1320-20260905
+    paths:
+      - .github/workflows/verify-goal-catalog-20260905.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Cloudflare dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify production Goal catalog counts
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT u.subject, COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject" --json > /tmp/goal-counts.json
+          cat /tmp/goal-counts.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync('/tmp/goal-counts.json','utf8'));
+          const rows=(raw?.[0]?.results)||[];
+          const map=Object.fromEntries(rows.map(r=>[String(r.subject),Number(r.count)]));
+          const expected={英語:54,数学:62,国語:57,理科:59,社会:56};
+          const total=Object.values(map).reduce((a,b)=>a+b,0);
+          console.log('Goal counts:',map,'total=',total);
+          for(const [subject,count] of Object.entries(expected)){
+            if(map[subject]!==count) throw new Error(`${subject}: expected ${count}, got ${map[subject]??0}`);
+          }
+          if(total!==288) throw new Error(`Goal total expected 288, got ${total}`);
+          NODE
+      - name: Verify 1320 exists and grade
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT student_id,display_name,grade,status FROM students WHERE student_id='1320'" --json | tee /tmp/student1320.json
