@@ -1,5 +1,6 @@
 import { buildV83Dashboard } from "./dashboard.ts";
 import { GOAL_JAPANESE_MATERIAL, GOAL_JAPANESE_UNITS } from "./goal-japanese.ts";
+import { GOAL_ENGLISH_MATERIAL, GOAL_ENGLISH_UNITS } from "./goal-english.ts";
 
 type Row = Record<string, unknown>;
 type V3Env = Env & { GOOGLE_API_URL: string };
@@ -167,6 +168,7 @@ const ensureSchema = (env: V3Env) => {
 
 let bootstrapReady: Promise<void> | null = null;
 const GOAL_JAPANESE_CATALOG_KEY = "goal_japanese_catalog_20260825_v1";
+const GOAL_ENGLISH_CATALOG_KEY = "goal_english_catalog_20260905_v1";
 
 const ensureGoalJapaneseCatalog = async (env: V3Env) => {
   const existing = await env.DB.prepare(`SELECT COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series=? AND u.subject=? AND u.grade=? AND m.active=1`)
@@ -204,10 +206,40 @@ const ensureGoalJapaneseCatalog = async (env: V3Env) => {
     .run();
 };
 
+
+const ensureGoalEnglishCatalog = async (env: V3Env) => {
+  const existing = await env.DB.prepare(`SELECT COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series=? AND u.subject=? AND u.grade=? AND m.active=1`)
+    .bind(GOAL_ENGLISH_MATERIAL.series, GOAL_ENGLISH_MATERIAL.subject, GOAL_ENGLISH_MATERIAL.grade)
+    .first<{ count: number }>();
+  if (Number(existing?.count || 0) >= GOAL_ENGLISH_UNITS.length) return;
+  const material = env.DB.prepare(`INSERT INTO materials(material_id,series,subject,grade,title,has_lct,active,updated_at,version)
+    VALUES(?,?,?,?,?,?,1,datetime('now'),1)
+    ON CONFLICT(material_id) DO UPDATE SET series=excluded.series,subject=excluded.subject,grade=excluded.grade,title=excluded.title,has_lct=excluded.has_lct,active=1,updated_at=datetime('now'),version=materials.version+1`)
+    .bind(GOAL_ENGLISH_MATERIAL.materialId,GOAL_ENGLISH_MATERIAL.series,GOAL_ENGLISH_MATERIAL.subject,GOAL_ENGLISH_MATERIAL.grade,GOAL_ENGLISH_MATERIAL.title,GOAL_ENGLISH_MATERIAL.hasLct?1:0);
+  const units = GOAL_ENGLISH_UNITS.map((unit) => env.DB.prepare(`INSERT INTO units(unit_id,material_id,subject,grade,unit_order,unit_type,title,has_lct,updated_at,version)
+    VALUES(?,?,?,?,?,?,?,?,datetime('now'),1)
+    ON CONFLICT(unit_id) DO UPDATE SET material_id=excluded.material_id,subject=excluded.subject,grade=excluded.grade,unit_order=excluded.unit_order,unit_type=excluded.unit_type,title=excluded.title,has_lct=excluded.has_lct,updated_at=datetime('now'),version=units.version+1`)
+    .bind(unit.unitId,GOAL_ENGLISH_MATERIAL.materialId,GOAL_ENGLISH_MATERIAL.subject,GOAL_ENGLISH_MATERIAL.grade,unit.unitOrder,unit.unitType,unit.title,unit.hasLct?1:0));
+  await env.DB.batch([material,...units]);
+  await env.DB.prepare(`INSERT INTO v3_meta(key,value,updated_at) VALUES(?,?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=datetime('now')`)
+    .bind(GOAL_ENGLISH_CATALOG_KEY,String(GOAL_ENGLISH_UNITS.length)).run();
+};
+
+const ensureDummy1331 = async (env: V3Env) => {
+  const existing = await env.DB.prepare(`SELECT display_name FROM students WHERE student_id='1331'`).first<{display_name:string}>();
+  if (existing?.display_name && existing.display_name !== '鈴木A') throw new Error('DUMMY_1331_CONFLICT');
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO students(student_id,display_name,school,grade,status,source_updated_at,updated_at,version) VALUES('1331','鈴木A','南城中','中3','ACTIVE',datetime('now'),datetime('now'),1) ON CONFLICT(student_id) DO UPDATE SET display_name='鈴木A',school='南城中',grade='中3',status='ACTIVE',updated_at=datetime('now'),version=students.version+1`),
+    env.DB.prepare(`INSERT INTO student_profiles(student_id,campus,school_name,grade_j_raw,grade_k_raw,grade_conflict,enrollment_status,source_updated_at,updated_at,version) VALUES('1331','神領','南城中','中３','中３',0,'ACTIVE',datetime('now'),datetime('now'),1) ON CONFLICT(student_id) DO UPDATE SET campus='神領',school_name='南城中',grade_j_raw='中３',grade_k_raw='中３',grade_conflict=0,enrollment_status='ACTIVE',updated_at=datetime('now'),version=student_profiles.version+1`),
+  ]);
+};
+
 const ensureBootstrap = (env: V3Env) => {
   if (!bootstrapReady) bootstrapReady = (async () => {
     await ensureSchema(env);
     await ensureGoalJapaneseCatalog(env);
+    await ensureGoalEnglishCatalog(env);
+    await ensureDummy1331(env);
     const done = await env.DB.prepare("SELECT value FROM v3_meta WHERE key='bootstrap_complete'").first<{ value: string }>();
     if (done?.value !== "1") await env.DB.batch([
       env.DB.prepare(`INSERT OR IGNORE INTO v3_progress_records(record_id,student_id,material_id,subject,grade,unit_id,round,point_confirmed,warmup_confirmed,try_completed,memorization_completed,exercise_completed,lct_result,learning_date,updated_at,updated_by,version,request_id)
@@ -496,9 +528,9 @@ export default {
     try{
       if(url.pathname==="/health"&&request.method==="GET"){
         const started=performance.now();await ensureBootstrap(env);
-        const [students,progress,targets,homework,generatedHomework,dummy,goalJapanese]=await env.DB.batch([env.DB.prepare("SELECT COUNT(*) AS count FROM students"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_progress_records"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_target_snapshot"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_homework_snapshot"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_homework_items"),env.DB.prepare("SELECT COUNT(*) AS count FROM students WHERE student_id='1320'"),env.DB.prepare("SELECT COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND u.subject='国語' AND u.grade='中3' AND m.active=1")]);
+        const [students,progress,targets,homework,generatedHomework,dummy,goalJapanese,goalEnglish,testStudents,goalEnglishEligibility]=await env.DB.batch([env.DB.prepare("SELECT COUNT(*) AS count FROM students"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_progress_records"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_target_snapshot"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_homework_snapshot"),env.DB.prepare("SELECT COUNT(*) AS count FROM v3_homework_items"),env.DB.prepare("SELECT COUNT(*) AS count FROM students WHERE student_id='1320'"),env.DB.prepare("SELECT COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND u.subject='国語' AND u.grade='中3' AND m.active=1"),env.DB.prepare("SELECT COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND u.subject='英語' AND u.grade='中3' AND m.active=1"),env.DB.prepare("SELECT student_id,display_name,grade,status FROM students WHERE student_id IN ('1320','1331') ORDER BY student_id"),env.DB.prepare("SELECT s.student_id,s.grade,COUNT(u.unit_id) AS goal_english_count FROM students s CROSS JOIN materials m JOIN units u ON u.material_id=m.material_id WHERE s.student_id IN ('1320','1331') AND m.series='FORESTA_GOAL' AND m.active=1 AND u.subject='英語' AND (u.grade='' OR u.grade=s.grade OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=s.grade OR m.grade='中1～中3共通' OR (m.series='FORESTA_GOAL' AND s.grade IN ('中1','中2','中3') AND (u.grade='中3' OR m.grade='中3'))) GROUP BY s.student_id,s.grade ORDER BY s.student_id")]);
         const count=(r:D1Result<unknown>)=>Number((r.results[0] as Row|undefined)?.count||0);
-        return json({ok:true,service:"step-progress-v3-staging",mode:"d1-isolated-autosave",studentCount:count(students),progressCount:count(progress),targetCount:count(targets),homeworkCount:count(homework),generatedHomeworkCount:count(generatedHomework),dummy1320:count(dummy),goalJapaneseUnitCount:count(goalJapanese),bootstrapMs:elapsed(started)});
+        return json({ok:true,service:"step-progress-v3",mode:"d1-isolated-autosave",studentCount:count(students),progressCount:count(progress),targetCount:count(targets),homeworkCount:count(homework),generatedHomeworkCount:count(generatedHomework),dummy1320:count(dummy),goalJapaneseUnitCount:count(goalJapanese),goalEnglishUnitCount:count(goalEnglish),testStudents:testStudents.results,goalEnglishEligibility:goalEnglishEligibility.results,bootstrapMs:elapsed(started)});
       }
       if(url.pathname==="/api"&&request.method==="POST")return handleApi(request,env);
       return json({error:"NOT_FOUND"},404);
