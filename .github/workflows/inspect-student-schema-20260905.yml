@@ -1,0 +1,67 @@
+name: Inspect student schema for 1331
+
+on:
+  push:
+    branches: ["codex/fix-goal-targets-1320-20260905"]
+    paths: [".github/workflows/inspect-student-schema-20260905.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Deploy schema inspector
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          cat > src/student-schema-inspector.ts <<'TS'
+          interface Env { DB: D1Database; SMOKE_TOKEN: string }
+          const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
+          export default {async fetch(req:Request,env:Env){
+            if(req.headers.get('authorization')!==`Bearer ${env.SMOKE_TOKEN}`) return json({ok:false},403);
+            const studentsSchema=await env.DB.prepare("PRAGMA table_info(students)").all();
+            const profilesSchema=await env.DB.prepare("PRAGMA table_info(student_profiles)").all();
+            const nearby=await env.DB.prepare("SELECT * FROM students WHERE student_id IN ('1320','1330','1331') ORDER BY student_id").all();
+            const profiles=await env.DB.prepare("SELECT * FROM student_profiles WHERE student_id IN ('1320','1330','1331') ORDER BY student_id").all().catch(()=>({results:[]} as any));
+            return json({ok:true,studentsSchema:studentsSchema.results,profilesSchema:profilesSchema.results,nearby:nearby.results,profiles:profiles.results});
+          }} satisfies ExportedHandler<Env>;
+          TS
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs'); const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8')); c.main='src/student-schema-inspector.ts'; c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN; fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected student schema inspector"
+      - name: Query
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do code=$(curl -sS -o /tmp/schema.json -w '%{http_code}' -H "Authorization: Bearer $SMOKE_TOKEN" -X POST https://step-progress-v3-smoke.stepkobetsu.workers.dev/ || true); [ "$code" = 200 ] && break; sleep 2; done
+          cat /tmp/schema.json
+      - name: Restore smoke
+        if: always()
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"; echo "::add-mask::$TOKEN"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs'); const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8')); c.main='src/v3-smoke.ts'; c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN; fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Restore standard protected V3 smoke worker"
