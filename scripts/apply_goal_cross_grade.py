@@ -22,6 +22,7 @@ if old not in s:
     raise SystemExit('dashboard target anchor missing')
 s = s.replace(old, new, 1)
 s = s.replace('    units: allUnits.filter((unit) => targetIds.has(unit.unitId)),', '    units: allUnits.filter((unit) => targetKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),', 1)
+s = s.replace('    outsideTargetUnits: allUnits.filter((unit) => !targetIds.has(unit.unitId) && progressKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),', '    outsideTargetUnits: allUnits.filter((unit) => !targetKeys.has(unitKey(unit.subject, unit.series, unit.unitId)) && progressKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),', 1)
 s = s.replace('    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetIds.has(unit.unitId) })),', '    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetKeys.has(unitKey(unit.subject, unit.series, unit.unitId)) })),', 1)
 if 'targetIds.has' in s:
     raise SystemExit('stale targetIds reference remains')
