@@ -1,0 +1,59 @@
+name: Deploy Goal cross-grade support production
+
+on:
+  push:
+    branches: ["codex/fix-goal-targets-1320-20260905"]
+    paths: [".github/workflows/deploy-goal-crossgrade-prod-20260905.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify code and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix cloudflare run check
+          npx -y node@24 --test cloudflare/tests/goal-cross-grade-selection.test.mjs cloudflare/tests/dashboard.test.mjs cloudflare/tests/summary.test.mjs cloudflare/tests/v3-homework-generation.test.mjs cloudflare/tests/target-cloud-reliability.test.mjs
+          node --check < apps-script/code.gs
+          git diff --check
+      - name: Deploy production Worker and assets
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Enable FORESTA_GOAL for middle school grades"
+      - name: Verify production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 15); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' https://step-progress-api.stepkobetsu.workers.dev/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          node -e "const h=require('/tmp/health.json'); if(h.ok!==true)process.exit(1); console.log('production health ok',h.studentCount,h.goalJapaneseUnitCount)"
+      - name: Remove temporary deployment workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/deploy-goal-crossgrade-prod-20260905.yml cloudflare/package-lock.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove one-shot Goal production workflow"
+          git push origin HEAD:codex/fix-goal-targets-1320-20260905
