@@ -1,0 +1,85 @@
+name: Inspect 1320 and 1331 via protected worker
+
+on:
+  push:
+    branches: ["codex/fix-goal-targets-1320-20260905"]
+    paths: [".github/workflows/inspect-1320-1331-worker-20260905.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Cloudflare dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Deploy protected inspector
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          cat > src/student-goal-inspector.ts <<'TS'
+          interface Env { DB: D1Database; SMOKE_TOKEN: string }
+          const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
+          export default {
+            async fetch(request:Request,env:Env):Promise<Response>{
+              if(request.headers.get("authorization")!==`Bearer ${env.SMOKE_TOKEN}`) return json({ok:false,error:"FORBIDDEN"},403);
+              const students=await env.DB.prepare("SELECT student_id,display_name,grade,status,school FROM students WHERE student_id IN ('1320','1331') ORDER BY student_id").all();
+              const profiles=await env.DB.prepare("SELECT student_id,campus,grade,enrollment_status FROM student_profiles WHERE student_id IN ('1320','1331') ORDER BY student_id").all().catch(()=>({results:[]} as any));
+              const counts=await env.DB.prepare("SELECT u.subject,COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject").all();
+              const progress=await env.DB.prepare("SELECT student_id,COUNT(*) AS progress_rows FROM v3_progress_records WHERE student_id IN ('1320','1331') GROUP BY student_id ORDER BY student_id").all().catch(()=>({results:[]} as any));
+              const targets=await env.DB.prepare("SELECT student_id,series,subject,COUNT(*) AS rows,SUM(included) AS included FROM v3_target_overrides WHERE student_id IN ('1320','1331') GROUP BY student_id,series,subject ORDER BY student_id,series,subject").all().catch(()=>({results:[]} as any));
+              const visibility=await env.DB.prepare("SELECT s.student_id,s.grade,u.subject,COUNT(*) AS goal_count FROM students s CROSS JOIN units u JOIN materials m ON m.material_id=u.material_id WHERE s.student_id IN ('1320','1331') AND m.series='FORESTA_GOAL' AND m.active=1 AND (u.grade='中3' OR m.grade='中3') GROUP BY s.student_id,s.grade,u.subject ORDER BY s.student_id,u.subject").all();
+              return json({ok:true,students:students.results,profiles:profiles.results,goalCounts:counts.results,progress:progress.results,targets:targets.results,visibility:visibility.results});
+            }
+          } satisfies ExportedHandler<Env>;
+          TS
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.main='src/student-goal-inspector.ts';
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected 1320/1331 inspector"
+      - name: Inspect
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/inspect.json -w '%{http_code}' -H "Authorization: Bearer $SMOKE_TOKEN" -X POST https://step-progress-v3-smoke.stepkobetsu.workers.dev/ || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          cat /tmp/inspect.json
+          node -e "const x=require('/tmp/inspect.json'); if(!x.ok)process.exit(1); console.log('students=',x.students); console.log('goalCounts=',x.goalCounts); console.log('progress=',x.progress); console.log('targets=',x.targets); console.log('visibility=',x.visibility);"
+      - name: Restore standard smoke worker
+        if: always()
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.main='src/v3-smoke.ts';
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Restore standard protected V3 smoke worker"
