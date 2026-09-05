@@ -1,0 +1,81 @@
+name: Run one-shot 1331 seed
+
+on:
+  push:
+    branches: ["codex/fix-goal-targets-1320-20260905"]
+    paths: [".github/workflows/run-1331-seed-20260905.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Deploy protected seed worker
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.main='src/seed-1331.ts';
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "One-shot protected 1331 seed"
+      - name: Seed and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/seed.json -w '%{http_code}' -H "Authorization: Bearer $SMOKE_TOKEN" -X POST https://step-progress-v3-smoke.stepkobetsu.workers.dev/ || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          cat /tmp/seed.json
+          node -e "const x=require('/tmp/seed.json'); if(!x.ok||x.student?.student_id!=='1331'||x.student?.grade!=='中3'||x.profile?.campus!=='神領'||Number(x.progressCount)!==0||Number(x.targetOverrideCount)!==0) process.exit(1)"
+      - name: Restore smoke
+        if: always()
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.main='src/v3-smoke.ts';
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Restore standard protected V3 smoke worker"
+      - name: Clean one-shot files
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/run-1331-seed-20260905.yml cloudflare/src/seed-1331.ts cloudflare/package-lock.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove one-shot 1331 seed files"
+          git push origin HEAD:codex/fix-goal-targets-1320-20260905
