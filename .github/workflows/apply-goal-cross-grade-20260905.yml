@@ -42,3 +42,4 @@ jobs:
           git add -A
           git commit -m "Enable Goal for middle school grades"
           git push origin HEAD:codex/fix-goal-targets-1320-20260905
+# retry 2
