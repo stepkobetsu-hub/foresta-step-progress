@@ -309,8 +309,8 @@ const readDashboardV3 = async (env: V3Env, studentId: string) => {
     if (matching.length) matching.forEach((row) => { row.included = included ? 1 : 0; row.series = series; });
     else if (included) targets.push({ target_id:`V3:${studentId}:${series}:${unitId}`, material_id:"", subject, unit_id:unitId, target_start:unitId, target_end:unitId, target_period:"V3_OVERRIDE", included:1, series });
   }
-  const selectableResult = await env.DB.prepare(`SELECT u.unit_id,u.subject,u.grade,u.unit_order,u.unit_type,u.title AS unit_title,u.has_lct,m.series,m.active FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.active=1 AND (u.grade='' OR u.grade=? OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=? OR m.grade='中1～中3共通') ORDER BY u.subject,m.series,u.unit_order,u.unit_id`)
-    .bind(text(student.grade), text(student.grade)).all();
+  const selectableResult = await env.DB.prepare(`SELECT u.unit_id,u.subject,u.grade,u.unit_order,u.unit_type,u.title AS unit_title,u.has_lct,m.series,m.active FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.active=1 AND (u.grade='' OR u.grade=? OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=? OR m.grade='中1～中3共通' OR (m.series='FORESTA_GOAL' AND ? IN ('中1','中2','中3') AND (u.grade='中3' OR m.grade='中3'))) ORDER BY u.subject,m.series,u.unit_order,u.unit_id`)
+    .bind(text(student.grade), text(student.grade), text(student.grade)).all();
   const generatedHomeworkResult = await env.DB.prepare("SELECT assigned_date,unit_id,round_number,homework_type FROM v3_homework_items WHERE student_id=?").bind(studentId).all();
   return buildV83Dashboard(student, targets, progressResult.results.filter(isRow), homeworkResult.results.filter(isRow), selectableResult.results.filter(isRow), generatedHomeworkResult.results.filter(isRow));
 };
@@ -363,6 +363,10 @@ const saveTargetChanges = async (env: V3Env, session: Session, body: Row) => {
   const studentId=requestedStudentId(session,text(body.studentId)), subject=text(body.subject), series=text(body.series)||"FORESTA_STEP";
   const changes=Array.isArray(body.changes)?body.changes.filter(isRow).slice(0,500):[];
   if(!studentId||!subject||!changes.length)return json({success:false,error:"目標範囲を特定できません。"},400);
+  const beforeDashboard=await readDashboardV3(env,studentId);
+  const selectableBefore=beforeDashboard&&Array.isArray((beforeDashboard as Row).selectableUnits)?((beforeDashboard as Row).selectableUnits as unknown[]).filter(isRow):[];
+  const allowedUnitIds=new Set(selectableBefore.filter((unit)=>text(unit.subject)===subject&&text(unit.series)===series).map((unit)=>text(unit.unitId||unit.unit_id)).filter(Boolean));
+  if(changes.some((change)=>!allowedUnitIds.has(text(change.unitId))))return json({success:false,error:"選択できない単元が含まれています。"},400);
   await env.DB.batch(changes.map((change)=>env.DB.prepare(`INSERT INTO v3_target_overrides(student_id,series,subject,unit_id,included,updated_at,updated_by) VALUES(?,?,?,?,?,datetime('now'),?) ON CONFLICT(student_id,series,subject,unit_id) DO UPDATE SET included=excluded.included,updated_at=datetime('now'),updated_by=excluded.updated_by`).bind(studentId,series,subject,text(change.unitId),bool(change.selected)?1:0,session.userId)));
   const dashboard=await readDashboardV3(env,studentId);
   const selectable=dashboard&&Array.isArray((dashboard as Row).selectableUnits)?((dashboard as Row).selectableUnits as unknown[]).filter(isRow):[];

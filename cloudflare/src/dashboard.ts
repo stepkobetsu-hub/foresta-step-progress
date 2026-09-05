@@ -34,12 +34,11 @@ const progressState = (row: Row | undefined, roundNumber: number) => ({
 
 export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[], homework: Row[], selectable: Row[], generatedHomework: Row[] = []) => {
   const summary = buildDashboardSummary(targets, progress, homework);
-  // unit_id is globally unique in the units table. Target inclusion therefore
-  // uses only unit_id; mixing legacy series labels into target identity caused
-  // a saved target to appear restored after reload.
-  const targetIds = new Set(targets
+  // Goal and Step targets are independent. Keep series + subject + unit id
+  // in the target identity so one series can never restore or clear the other.
+  const targetKeys = new Set(targets
     .filter((row) => truthy(row.included))
-    .map((row) => text(row.unit_id))
+    .map((row) => unitKey(row.subject, row.series, row.unit_id))
     .filter(Boolean));
   const progressByKey = new Map(progress.map((row) => [`${text(row.unit_id)}:${Number(row.round) || 1}`, row]));
   const mapUnit = (unit: Row) => {
@@ -112,9 +111,9 @@ export const buildV83Dashboard = (student: Row, targets: Row[], progress: Row[],
       subjects: [],
     },
     newMilestone: null,
-    units: allUnits.filter((unit) => targetIds.has(unit.unitId)),
-    outsideTargetUnits: allUnits.filter((unit) => !targetIds.has(unit.unitId) && progressKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),
-    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetIds.has(unit.unitId) })),
+    units: allUnits.filter((unit) => targetKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),
+    outsideTargetUnits: allUnits.filter((unit) => !targetKeys.has(unitKey(unit.subject, unit.series, unit.unitId)) && progressKeys.has(unitKey(unit.subject, unit.series, unit.unitId))),
+    selectableUnits: allUnits.map((unit, displayOrder) => ({ ...unit, displayOrder, targetIncluded: targetKeys.has(unitKey(unit.subject, unit.series, unit.unitId)) })),
     lastStudentInputAt: newest,
     achievements: { earned: [], next: null },
   };
