@@ -588,6 +588,17 @@ function cacheRemoveLargeJson_(cache, key) {
   cache.removeAll(keys);
 }
 
+function isMiddleSchoolGradeForGoal_(grade) {
+  const normalized = String(grade || '').normalize('NFKC').replace(/年$/u, '');
+  return ['中1', '中2', '中3'].includes(normalized);
+}
+
+function isGoalCatalogUnitForGrade_(grade, unit) {
+  return isMiddleSchoolGradeForGoal_(grade) &&
+    normalizeSeries_(unit && unit.series) === MATERIAL_SERIES.GOAL &&
+    String(unit && unit.gradeScope || '').normalize('NFKC').replace(/年$/u, '') === '中3';
+}
+
 function getCachedSelectableUnits_(grade, subject, series) {
   const startedAt = Date.now();
   const cache = CacheService.getScriptCache();
@@ -603,11 +614,7 @@ function getCachedSelectableUnits_(grade, subject, series) {
     .filter(unit =>
       String(unit.gradeScope) === String(grade) ||
       String(unit.gradeScope) === '中1～中3共通' ||
-      (
-        isDevelopment_() &&
-        normalizeSeries_(unit.series) === MATERIAL_SERIES.GOAL &&
-        String(unit.gradeScope) === '中3'
-      )
+isGoalCatalogUnitForGrade_(grade, unit)
     )
     .filter(unit => !subject || String(unit.subject) === String(subject))
     .filter(unit => normalizedSeries === 'ALL' || normalizeSeries_(unit.series) === normalizedSeries)
@@ -25636,11 +25643,7 @@ function filterUnitsForProfile_(profile, units) {
     return !gradeScope ||
       gradeScope === grade ||
       gradeScope === '中1～中3共通' ||
-      (
-        isDevelopment_() &&
-        normalizeSeries_(unit && unit.series) === MATERIAL_SERIES.GOAL &&
-        gradeScope === '中3'
-      );
+      isGoalCatalogUnitForGrade_(grade, unit);
   });
 }
 
@@ -25650,11 +25653,7 @@ function getSelectableUnitsForProfile_(profile, units) {
     .filter(unit =>
       String(unit.gradeScope) === String(profile.grade) ||
       String(unit.gradeScope) === '中1～中3共通' ||
-      (
-        isDevelopment_() &&
-        normalizeSeries_(unit.series) === MATERIAL_SERIES.GOAL &&
-        String(unit.gradeScope) === '中3'
-      )
+isGoalCatalogUnitForGrade_(profile.grade, unit)
     )
     .sort((a, b) => Number(a.displayOrder || 0) - Number(b.displayOrder || 0));
 }
