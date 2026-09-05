@@ -1,0 +1,90 @@
+name: Verify 1320 and 1331 Goal production data
+
+on:
+  push:
+    branches: ["codex/fix-goal-targets-1320-20260905"]
+    paths: [".github/workflows/verify-goal-prod-students-20260905.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Deploy protected verifier
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          cat > src/verify-goal-students.ts <<'TS'
+          interface Env { DB: D1Database; SMOKE_TOKEN: string }
+          const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
+          export default {async fetch(req:Request,env:Env){
+            if(req.headers.get('authorization')!==`Bearer ${env.SMOKE_TOKEN}`) return json({ok:false},403);
+            const students=await env.DB.prepare("SELECT s.student_id,s.display_name,s.grade,s.status,p.campus,p.school_name FROM students s LEFT JOIN student_profiles p ON p.student_id=s.student_id WHERE s.student_id IN ('1320','1331') ORDER BY s.student_id").all();
+            const out=[];
+            for(const s of students.results as any[]){
+              const units=await env.DB.prepare(`SELECT u.subject,m.series,COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.active=1 AND (u.grade='' OR u.grade=? OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=? OR m.grade='中1～中3共通' OR (m.series='FORESTA_GOAL' AND ? IN ('中1','中2','中3') AND (u.grade='中3' OR m.grade='中3'))) GROUP BY u.subject,m.series ORDER BY u.subject,m.series`).bind(s.grade,s.grade,s.grade).all();
+              out.push({student:s,counts:units.results});
+            }
+            return json({ok:true,students:out});
+          }} satisfies ExportedHandler<Env>;
+          TS
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs'); const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8')); c.main='src/verify-goal-students.ts'; c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN; fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Protected Goal production student verifier"
+      - name: Verify counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do code=$(curl -sS -o /tmp/verify.json -w '%{http_code}' -H "Authorization: Bearer $SMOKE_TOKEN" -X POST https://step-progress-v3-smoke.stepkobetsu.workers.dev/ || true); [ "$code" = 200 ] && break; sleep 2; done
+          node - <<'NODE'
+          const x=require('/tmp/verify.json'); if(!x.ok) throw new Error('verify failed');
+          if(x.students.length!==2) throw new Error('1320/1331 missing');
+          for(const row of x.students){
+            const id=row.student.student_id, grade=row.student.grade;
+            const goal=Object.fromEntries(row.counts.filter(r=>r.series==='FORESTA_GOAL').map(r=>[r.subject,Number(r.count)]));
+            if(!['中1','中2','中3'].includes(grade)||Object.keys(goal).length<5) throw new Error(`${id} Goal not available`);
+            console.log(`${id}: grade=${grade}, campus=${row.student.campus}, Goal=${JSON.stringify(goal)}`);
+          }
+          NODE
+      - name: Restore smoke
+        if: always()
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"; echo "::add-mask::$TOKEN"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs'); const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8')); c.main='src/v3-smoke.ts'; c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN; fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Restore standard protected V3 smoke worker"
+      - name: Clean verifier
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/verify-goal-prod-students-20260905.yml cloudflare/package-lock.json cloudflare/wrangler.v3-smoke.generated.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove one-shot Goal production verifier"
+          git push origin HEAD:codex/fix-goal-targets-1320-20260905
