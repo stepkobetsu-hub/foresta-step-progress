@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "step-progress-v3-smoke",
+  "main": "src/v3-smoke.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "SMOKE_TOKEN": "15fa2f8e0b80effd683c07edcbd89868559954fd46e8bee5383b66cd5dbd70a2"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "step-progress-db",
+      "database_id": "028f097c-2609-4bf7-9e9b-39b565606941"
+    }
+  ]
+}
