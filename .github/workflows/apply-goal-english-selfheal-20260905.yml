@@ -1,0 +1,42 @@
+name: Apply Goal English self-heal 20260905
+on:
+  push:
+    branches: ["agent/step-progress-v3-implementation"]
+    paths: [".github/workflows/apply-goal-english-selfheal-20260905.yml"]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply patch
+        run: python .github/scripts/patch-goal-english-selfheal-20260905.py
+      - name: Install
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix cloudflare run check
+          npx -y node@24 --test cloudflare/tests/goal-cross-grade-selection.test.mjs cloudflare/tests/goal-english-selfheal.test.mjs cloudflare/tests/dashboard.test.mjs cloudflare/tests/summary.test.mjs cloudflare/tests/v3-homework-generation.test.mjs cloudflare/tests/target-cloud-reliability.test.mjs
+          node --check < apps-script/code.gs
+          git diff --check
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloudflare/src/v3.ts cloudflare/tests/goal-english-selfheal.test.mjs
+          git rm .github/scripts/patch-goal-english-selfheal-20260905.py .github/workflows/apply-goal-english-selfheal-20260905.yml
+          git commit -m "Self-heal Goal English catalog in runtime"
+          git push origin HEAD:agent/step-progress-v3-implementation
