@@ -1,0 +1,104 @@
+name: Deploy Goal English 54 recovery 20260905
+
+on:
+  push:
+    branches:
+      - agent/step-progress-v3-implementation
+    paths:
+      - .github/workflows/deploy-goal-english-54-20260905.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: goal-english-54-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/step-progress-v3-implementation
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify code before production
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix cloudflare run check
+          npx -y node@24 --test cloudflare/tests/goal-cross-grade-selection.test.mjs cloudflare/tests/dashboard.test.mjs cloudflare/tests/summary.test.mjs cloudflare/tests/v3-homework-generation.test.mjs cloudflare/tests/target-cloud-reliability.test.mjs
+          node --check < apps-script/code.gs
+          git diff --check
+      - name: Inspect production before migration
+        working-directory: cloudflare
+        run: |
+          npx wrangler d1 execute step-progress-db --remote --command "SELECT u.subject,COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject; SELECT student_id,display_name,grade,status FROM students WHERE student_id IN ('1320','1331') ORDER BY student_id;" --json
+      - name: Restore canonical Goal English 54 units
+        working-directory: cloudflare
+        run: npx wrangler d1 execute step-progress-db --remote --file=./migrations/0011_restore_goal_english_catalog.sql --yes
+      - name: Ensure dummy 1331 is usable as middle school grade 3
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute step-progress-db --remote --command "INSERT INTO students(student_id,display_name,school,grade,status,source_updated_at,updated_at,version) VALUES('1331','鈴木A','南城中','中3','ACTIVE',datetime('now'),datetime('now'),1) ON CONFLICT(student_id) DO UPDATE SET display_name='鈴木A',school='南城中',grade='中3',status='ACTIVE',updated_at=datetime('now'),version=students.version+1; INSERT INTO student_profiles(student_id,campus,school_name,grade_j_raw,grade_k_raw,grade_conflict,enrollment_status,source_updated_at,updated_at,version) VALUES('1331','神領','南城中','中３','中３',0,'ACTIVE',datetime('now'),datetime('now'),1) ON CONFLICT(student_id) DO UPDATE SET campus='神領',school_name='南城中',grade_j_raw='中３',grade_k_raw='中３',grade_conflict=0,enrollment_status='ACTIVE',updated_at=datetime('now'),version=student_profiles.version+1;" --json
+      - name: Verify production D1 catalog and test students
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute step-progress-db --remote --command "SELECT u.subject,COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject; SELECT student_id,display_name,grade,status FROM students WHERE student_id IN ('1320','1331') ORDER BY student_id; SELECT s.student_id,s.grade,COUNT(u.unit_id) AS goal_english_count FROM students s CROSS JOIN materials m JOIN units u ON u.material_id=m.material_id WHERE s.student_id IN ('1320','1331') AND m.series='FORESTA_GOAL' AND m.active=1 AND u.subject='英語' AND (u.grade='' OR u.grade=s.grade OR u.grade='中1～中3共通' OR m.grade='' OR m.grade=s.grade OR m.grade='中1～中3共通' OR (m.series='FORESTA_GOAL' AND s.grade IN ('中1','中2','中3') AND (u.grade='中3' OR m.grade='中3'))) GROUP BY s.student_id,s.grade ORDER BY s.student_id;" --json > /tmp/goal-after.json
+          cat /tmp/goal-after.json
+          node - <<'NODE'
+          const fs=require('fs');
+          const raw=JSON.parse(fs.readFileSync('/tmp/goal-after.json','utf8'));
+          const sets=Array.isArray(raw)?raw:[];
+          const all=sets.flatMap(x=>x.results||[]);
+          const subjectRows=all.filter(x=>x.subject && x.count!==undefined);
+          const counts=Object.fromEntries(subjectRows.map(x=>[String(x.subject),Number(x.count)]));
+          if(counts['英語']!==54) throw new Error(`Goal English expected 54, got ${counts['英語']}`);
+          const students=all.filter(x=>x.student_id && x.display_name);
+          const s1320=students.find(x=>String(x.student_id)==='1320');
+          const s1331=students.find(x=>String(x.student_id)==='1331');
+          if(!s1320 || String(s1320.grade)!=='中2') throw new Error('1320 is not ready as 中2');
+          if(!s1331 || String(s1331.grade)!=='中3') throw new Error('1331 is not ready as 中3');
+          const eligibility=all.filter(x=>x.goal_english_count!==undefined);
+          for(const id of ['1320','1331']){
+            const row=eligibility.find(x=>String(x.student_id)===id);
+            if(!row || Number(row.goal_english_count)!==54) throw new Error(`${id} Goal English selectable count is not 54`);
+          }
+          console.log('Verified Goal English=54; 1320/1331 eligibility=54.');
+          NODE
+      - name: Deploy production V3 Worker
+        working-directory: cloudflare
+        run: npx wrangler deploy --config wrangler.v3.production.jsonc --message "Goal cross-grade + canonical English 54"
+      - name: Verify production Worker health
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error https://step-progress-api.stepkobetsu.workers.dev/health -o /tmp/health.json; then break; fi
+            sleep 3
+          done
+          cat /tmp/health.json
+          node -e "const h=require('/tmp/health.json'); if(h.ok!==true) process.exit(1)"
+      - name: Remove one-shot workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/deploy-goal-english-54-20260905.yml
+          git commit -m "Remove one-shot Goal English deploy workflow"
+          git push origin HEAD:agent/step-progress-v3-implementation
