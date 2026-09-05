@@ -1,0 +1,45 @@
+name: Inspect 1320 and 1331 production D1
+
+on:
+  push:
+    branches: ["codex/fix-goal-targets-1320-20260905"]
+    paths: [".github/workflows/inspect-1320-1331-20260905.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-goal-targets-1320-20260905
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Cloudflare dependencies
+        working-directory: cloudflare
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Inspect production D1
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- tables ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE '%student%' OR name LIKE 'v3_%' OR name IN ('materials','units')) ORDER BY name;"
+          echo '--- students 1320/1331 ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT student_id,display_name,grade,status,school FROM students WHERE student_id IN ('1320','1331') ORDER BY student_id;"
+          echo '--- profiles 1320/1331 ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT student_id,campus,grade,enrollment_status FROM student_profiles WHERE student_id IN ('1320','1331') ORDER BY student_id;" || true
+          echo '--- Goal catalog counts ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT u.subject,COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject;"
+          echo '--- Goal visibility for both ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT s.student_id,s.grade,u.subject,COUNT(*) AS goal_count FROM students s CROSS JOIN units u JOIN materials m ON m.material_id=u.material_id WHERE s.student_id IN ('1320','1331') AND m.series='FORESTA_GOAL' AND m.active=1 AND (u.grade='中3' OR m.grade='中3') GROUP BY s.student_id,s.grade,u.subject ORDER BY s.student_id,u.subject;"
+          echo '--- progress counts ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT student_id,COUNT(*) AS progress_rows FROM v3_progress_records WHERE student_id IN ('1320','1331') GROUP BY student_id ORDER BY student_id;" || true
+          echo '--- target override counts ---'
+          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT student_id,series,subject,COUNT(*) AS rows,SUM(included) AS included FROM v3_target_overrides WHERE student_id IN ('1320','1331') GROUP BY student_id,series,subject ORDER BY student_id,series,subject;" || true
