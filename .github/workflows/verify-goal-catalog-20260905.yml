@@ -26,29 +26,59 @@ jobs:
       - name: Install Cloudflare dependencies
         working-directory: cloudflare
         run: npm install --ignore-scripts --no-audit --no-fund
-      - name: Verify production Goal catalog counts
+      - name: Deploy protected read-only Goal inspector
         working-directory: cloudflare
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT u.subject, COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject" --json > /tmp/goal-counts.json
-          cat /tmp/goal-counts.json
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "SMOKE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          cat > src/goal-catalog-inspector.ts <<'TS'
+          interface Env { DB: D1Database; SMOKE_TOKEN: string }
+          const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
+          export default {
+            async fetch(request:Request,env:Env):Promise<Response>{
+              if(request.headers.get("authorization")!==`Bearer ${env.SMOKE_TOKEN}`) return json({ok:false,error:"FORBIDDEN"},403);
+              if(request.method!=="POST") return json({ok:false,error:"POST_ONLY"},405);
+              const counts=await env.DB.prepare("SELECT u.subject, COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject").all();
+              const student=await env.DB.prepare("SELECT student_id,display_name,grade,status FROM students WHERE student_id='1320'").first();
+              return json({ok:true,counts:counts.results,student});
+            }
+          } satisfies ExportedHandler<Env>;
+          TS
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.main='src/goal-catalog-inspector.ts';
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected Goal catalog inspector"
+      - name: Verify production Goal catalog and 1320
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/goal-inspect.json
+          for attempt in $(seq 1 12); do
+            code=$(curl --silent --show-error -o /tmp/goal-inspect.json -w '%{http_code}' \
+              -H "Authorization: Bearer $SMOKE_TOKEN" -X POST \
+              https://step-progress-v3-smoke.stepkobetsu.workers.dev/ || true)
+            if [ "$code" = "200" ]; then break; fi
+            sleep 3
+          done
+          cat /tmp/goal-inspect.json
           node - <<'NODE'
           const fs=require('fs');
-          const raw=JSON.parse(fs.readFileSync('/tmp/goal-counts.json','utf8'));
-          const rows=(raw?.[0]?.results)||[];
-          const map=Object.fromEntries(rows.map(r=>[String(r.subject),Number(r.count)]));
+          const raw=JSON.parse(fs.readFileSync('/tmp/goal-inspect.json','utf8'));
+          if(raw.ok!==true) throw new Error('Inspector failed');
+          const map=Object.fromEntries((raw.counts||[]).map(r=>[String(r.subject),Number(r.count)]));
           const expected={英語:54,数学:62,国語:57,理科:59,社会:56};
           const total=Object.values(map).reduce((a,b)=>a+b,0);
           console.log('Goal counts:',map,'total=',total);
-          for(const [subject,count] of Object.entries(expected)){
-            if(map[subject]!==count) throw new Error(`${subject}: expected ${count}, got ${map[subject]??0}`);
-          }
+          console.log('1320:',raw.student);
+          for(const [subject,count] of Object.entries(expected)) if(map[subject]!==count) throw new Error(`${subject}: expected ${count}, got ${map[subject]??0}`);
           if(total!==288) throw new Error(`Goal total expected 288, got ${total}`);
+          if(String(raw.student?.student_id)!=='1320') throw new Error('1320 missing');
+          if(String(raw.student?.grade)!=='中2') throw new Error(`1320 grade expected 中2, got ${raw.student?.grade}`);
           NODE
-      - name: Verify 1320 exists and grade
-        working-directory: cloudflare
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx wrangler d1 execute step-progress-db --remote --config wrangler.v3.production.jsonc --command "SELECT student_id,display_name,grade,status FROM students WHERE student_id='1320'" --json | tee /tmp/student1320.json
