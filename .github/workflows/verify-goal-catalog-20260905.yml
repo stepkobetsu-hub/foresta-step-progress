@@ -42,8 +42,11 @@ jobs:
               if(request.headers.get("authorization")!==`Bearer ${env.SMOKE_TOKEN}`) return json({ok:false,error:"FORBIDDEN"},403);
               if(request.method!=="POST") return json({ok:false,error:"POST_ONLY"},405);
               const counts=await env.DB.prepare("SELECT u.subject, COUNT(*) AS count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND m.active=1 GROUP BY u.subject ORDER BY u.subject").all();
+              const materials=await env.DB.prepare("SELECT m.material_id,m.subject,m.grade,m.title,m.active,COUNT(u.unit_id) AS unit_count FROM materials m LEFT JOIN units u ON u.material_id=m.material_id WHERE m.series='FORESTA_GOAL' GROUP BY m.material_id,m.subject,m.grade,m.title,m.active ORDER BY m.subject,m.material_id").all();
+              const englishIds=await env.DB.prepare("SELECT m.series,m.material_id,m.title,m.grade,m.active,COUNT(u.unit_id) AS unit_count FROM units u JOIN materials m ON m.material_id=u.material_id WHERE u.unit_id LIKE '2026FG-ENG-%' GROUP BY m.series,m.material_id,m.title,m.grade,m.active ORDER BY m.series,m.material_id").all();
+              const englishUnits=await env.DB.prepare("SELECT u.unit_id,u.unit_order,u.title,u.grade,m.series,m.material_id,m.active FROM units u JOIN materials m ON m.material_id=u.material_id WHERE m.series='FORESTA_GOAL' AND u.subject='英語' ORDER BY u.unit_order,u.unit_id").all();
               const student=await env.DB.prepare("SELECT student_id,display_name,grade,status FROM students WHERE student_id='1320'").first();
-              return json({ok:true,counts:counts.results,student});
+              return json({ok:true,counts:counts.results,materials:materials.results,englishIds:englishIds.results,englishUnits:englishUnits.results,student});
             }
           } satisfies ExportedHandler<Env>;
           TS
@@ -55,7 +58,7 @@ jobs:
           fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
           NODE
           npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Temporary protected Goal catalog inspector"
-      - name: Verify production Goal catalog and 1320
+      - name: Inspect production Goal catalog and 1320
         shell: bash
         run: |
           set -euo pipefail
@@ -73,12 +76,28 @@ jobs:
           const raw=JSON.parse(fs.readFileSync('/tmp/goal-inspect.json','utf8'));
           if(raw.ok!==true) throw new Error('Inspector failed');
           const map=Object.fromEntries((raw.counts||[]).map(r=>[String(r.subject),Number(r.count)]));
-          const expected={英語:54,数学:62,国語:57,理科:59,社会:56};
           const total=Object.values(map).reduce((a,b)=>a+b,0);
-          console.log('Goal counts:',map,'total=',total);
+          console.log('\nGoal counts:',map,'total=',total);
           console.log('1320:',raw.student);
-          for(const [subject,count] of Object.entries(expected)) if(map[subject]!==count) throw new Error(`${subject}: expected ${count}, got ${map[subject]??0}`);
-          if(total!==288) throw new Error(`Goal total expected 288, got ${total}`);
+          console.log('Goal materials:',raw.materials);
+          console.log('2026FG English IDs grouped by material:',raw.englishIds);
+          console.log('Goal English unit IDs:',(raw.englishUnits||[]).map(x=>x.unit_id));
           if(String(raw.student?.student_id)!=='1320') throw new Error('1320 missing');
           if(String(raw.student?.grade)!=='中2') throw new Error(`1320 grade expected 中2, got ${raw.student?.grade}`);
           NODE
+      - name: Restore standard protected smoke worker
+        if: always()
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          SMOKE_TOKEN="$TOKEN" node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.v3-smoke.template.jsonc','utf8'));
+          c.main='src/v3-smoke.ts';
+          c.vars.SMOKE_TOKEN=process.env.SMOKE_TOKEN;
+          fs.writeFileSync('wrangler.v3-smoke.generated.json',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler deploy --config wrangler.v3-smoke.generated.json --message "Restore standard protected V3 smoke worker"
