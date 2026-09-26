@@ -107,11 +107,14 @@ function nowIso_() {
 
 function normalizeGrade_(value) {
   const raw = String(value || '').trim()
-    .replace(/[１２３]/g, c => ({'１':'1','２':'2','３':'3'})[c]);
+    .replace(/[１２３４５６]/g, c => ({'１':'1','２':'2','３':'3','４':'4','５':'5','６':'6'})[c]);
   const compact = raw.replace(/\s+/g, '');
-  if (/^(中学)?1年$/.test(compact) || compact === '中1') return '中1';
-  if (/^(中学)?2年$/.test(compact) || compact === '中2') return '中2';
-  if (/^(中学)?3年$/.test(compact) || compact === '中3') return '中3';
+  const elementary = compact.match(/^(?:小学)?([1-6])年$/) || compact.match(/^小([1-6])$/);
+  if (elementary) return '小' + elementary[1];
+  const middle = compact.match(/^(?:中学)?([1-3])年$/) || compact.match(/^中([1-3])$/);
+  if (middle) return '中' + middle[1];
+  const high = compact.match(/^(?:高校|高等学校)?([1-3])年$/) || compact.match(/^高([1-3])$/);
+  if (high) return '高' + high[1];
   return '';
 }
 
@@ -24237,7 +24240,7 @@ function authenticateStudent_(studentId, password) {
   const gradeJ = normalizeGrade_(record.gradeJRaw);
   const gradeK = normalizeGrade_(record.gradeKRaw);
   const grade = gradeJ || gradeK;
-  if (!grade) throw publicError_('中学生の学年を確認できません。教室へお問い合わせください。', 'GRADE_NOT_FOUND');
+  if (!grade) throw publicError_('学年を確認できません。教室へお問い合わせください。', 'GRADE_NOT_FOUND');
   stageStartedAt = Date.now();
   const result = {
     profile: {
