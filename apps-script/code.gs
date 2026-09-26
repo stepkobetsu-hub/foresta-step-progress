@@ -109,11 +109,11 @@ function normalizeGrade_(value) {
   const raw = String(value || '').trim()
     .replace(/[１２３４５６]/g, c => ({'１':'1','２':'2','３':'3','４':'4','５':'5','６':'6'})[c]);
   const compact = raw.replace(/\s+/g, '');
-  const elementary = compact.match(/^(?:小学)?([1-6])年$/) || compact.match(/^小([1-6])$/);
+  const elementary = compact.match(/^(?:小学)?([1-6])年$/) || compact.match(/^小([1-6])(?:年)?$/);
   if (elementary) return '小' + elementary[1];
-  const middle = compact.match(/^(?:中学)?([1-3])年$/) || compact.match(/^中([1-3])$/);
+  const middle = compact.match(/^(?:中学)?([1-3])年$/) || compact.match(/^中([1-3])(?:年)?$/);
   if (middle) return '中' + middle[1];
-  const high = compact.match(/^(?:高校|高等学校)?([1-3])年$/) || compact.match(/^高([1-3])$/);
+  const high = compact.match(/^(?:高校|高等学校)?([1-3])年$/) || compact.match(/^高([1-3])(?:年)?$/);
   if (high) return '高' + high[1];
   return '';
 }
